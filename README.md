@@ -6,16 +6,21 @@ It plays at `https://499apps.com/games/moon-touchdown/`.
 - Pick one of six real sites. They go from the flat Sea of Tranquility to the deep valley at Taurus-Littrow and the winding Hadley Rille.
 - The ground is real: LRO LOLA laser altimeter heights, at true scale.
 - Use the engine and tilt to slow down and stop the sideways drift. Touch down under 2 m/s.
-- Fuel counts in seconds of hovering. Chimes sound at 60 s and 30 s. The first crew to land had about a minute of margin.
+- The speed-down gauge follows the height: fast is fine high up, slow near the ground.
+- Edge arrows point to the target ring and to the predicted touchdown when they are out of view.
+- Fuel counts in seconds of hovering. Chimes sound at 60 s and 30 s. The first crew heard the "30 seconds" fuel call just before they touched down. On the hard sites, fuel is tight.
 - Get up to three stars: a soft touchdown, inside the green ring, and 30 s of fuel left. A soft touchdown opens the next site.
-- After each landing, the debrief shows your descent chart, your touchdown numbers and a fact about the site.
-- Younger players can tap the **hover helper**. It flies down gently and stops the drift for them.
+- After each landing, the debrief shows your descent chart, your touchdown numbers, a Moon map with the site, a fact about the site, a "you vs the real crew" line and a "Talk about it" question for the family.
+- The **Help** button turns on the hover helper. It flies the engine gently and stops the drift. The child steers to the ring.
+  New players start with Help on until they land softly once without it. Moving the throttle takes over the engine.
+  Best stars won with Help get a small helper mark on the site card.
 
 ## The privacy promise
 
 - The game collects nothing. No accounts, ads, analytics, cookies or trackers.
 - The game reads its own terrain files from the same site. It makes no other network calls and links to no other site.
-- Your progress (open sites, best stars) and the touch-pad setting stay on your device, in `localStorage` keys that start with `g499:moon-touchdown:`.
+- Your progress (open sites, best stars, whether Help flew the best run) and the touch-pad setting stay on your device, in `localStorage` keys that start with `g499:moon-touchdown:`.
+- On Android phones, the touchdown gives a short buzz (`navigator.vibrate`). It uses no network.
 - "Clear my data" in the left menu (hold the button) removes all `g499:` keys.
 - After the first visit, the game works offline. The service worker keeps the terrain files too.
 
@@ -23,10 +28,10 @@ It plays at `https://499apps.com/games/moon-touchdown/`.
 
 | Action | Touch | Keyboard | Gamepad |
 | --- | --- | --- | --- |
-| Engine up and down | Left slider | W / S or ↑ / ↓ | Left stick up and down, or RT / LT |
-| Tilt (lean the lander) | Drag on the right pad | A / D or ← / → (sideways), E / Q (away / toward), or I J K L | Right stick |
-| Hover helper on or off | Big round button | Space | A |
-| Start | Go button, or any engine or tilt input | Space (starts with the helper on) | A |
+| Engine up and down | Drag the left slider up or down (a tap changes nothing) | W / S | Left stick up and down, or RT / LT |
+| Tilt (lean the lander) | Drag on the right pad | Arrow keys or I J K L (A / D and E / Q also work) | Right stick |
+| Help (hover helper) on or off | Big round "Help" button | Space | A |
+| Start | Go button, or any engine or tilt input | Space (starts with Help on) | A |
 | Pause | Menu button (left) | P or Escape | Start |
 | Sound | Left menu | M | |
 
@@ -41,14 +46,16 @@ Turn the on-screen slider and pad on or off in the left menu ("Touch pad"). They
 | `src/input/mapping.ts` | Pure mapping of keys, sticks and touch to engine and tilt commands |
 | `src/input/devices.ts` | Held keys, gamepad reading and the touch slider and pad |
 | `src/scene/` | three.js scene: terrain levels of detail, baked sun shadows, lander, plume, dust, sky, camera |
-| `src/hud.ts`, `src/graphs.ts` | Flight readouts and the debrief chart |
-| `src/progress.ts` | Open sites and best stars in the kit storage |
+| `src/hud.ts`, `src/graphs.ts` | Flight readouts (height-aware speed bands) and the debrief chart |
+| `src/edgeArrows.ts` | Edge arrows to the ring and the predicted touchdown when they are out of view |
+| `src/moonMap.ts` | The small Moon map with the site dot, drawn in code |
+| `src/progress.ts` | Open sites, best stars and helper marks in the kit storage (schema v2, migrates v1) |
 | `src/main.ts` | Page wiring: rail items, site picker, run flow, debrief, sounds, test API |
 | `public/data/terrain/` | Six terrain grids (`<site>.bin`) and `sites.json` |
 | `scripts/terrain/` | The script that cut the terrain grids and their provenance (`SOURCE.md`) |
 | `docs/DESIGN.md` | Design, physics, realism notes and honest simplifications |
 
-Unit and property tests (Vitest + fast-check) cover the physics, the terrain sampling, the judge, the predictor, the hover helper, input mapping and storage.
+Unit and property tests (Vitest + fast-check) cover the physics, the terrain sampling, the judge, the predictor, the hover helper (also on the real terrain of all 6 sites), input mapping, the HUD bands, the edge arrows and storage.
 All randomness uses the kit's seeded PRNG, so a seed plus an input script replays the same flight.
 
 ## Run it

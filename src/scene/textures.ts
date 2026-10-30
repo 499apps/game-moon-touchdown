@@ -67,13 +67,42 @@ export interface RegolithDetail {
   albedo: THREE.DataTexture;
 }
 
+/** Crater count and size of the detail map (a site scales them). */
+export interface DetailLook {
+  craterDensity: number;
+  craterScale: number;
+}
+
+/** Smallest and largest crater radius (px) and the crater count at density 1. */
+const CRATER_R_MIN = 1.5;
+const CRATER_R_MAX = 40;
+const CRATER_COUNT = 250;
+/** Share of small craters that are fresh: dark floor, bright rim and a bright ray halo. */
+const FRESH_SHARE = 0.14;
+const FRESH_ALBEDO = 0.12;
+
 /**
- * Decorative regolith detail: seeded small craters and grain, tileable. This is NOT elevation
- * data; it only changes shading, never the ground the lander touches.
+ * Crater radius from a uniform u in [0, 1): a truncated power law with N(> r) ~ r^-2, so there
+ * are many small craters and few large ones (like real crater counts).
  */
-export function makeRegolithDetail(seed: number, size = 256): RegolithDetail {
+export function craterRadius(u: number, rMin = CRATER_R_MIN, rMax = CRATER_R_MAX): number {
+  const k = 1 - u * (1 - (rMin / rMax) ** 2);
+  return rMin / Math.sqrt(Math.max(1e-9, k));
+}
+
+/**
+ * Decorative regolith detail: seeded craters and grain, tileable. This is NOT elevation data;
+ * it only changes shading, never the ground the lander touches.
+ */
+export function makeRegolithDetail(
+  seed: number,
+  size = 256,
+  look: DetailLook = { craterDensity: 1, craterScale: 1 },
+): RegolithDetail {
   const rng = createRng(seed);
   const h = new Float32Array(size * size);
+  // Extra brightness of fresh craters (floors darker, rims and rays brighter).
+  const fresh = new Float32Array(size * size);
   const noise = makeValueNoise(rng, 32);
   for (let j = 0; j < size; j++) {
     for (let i = 0; i < size; i++) {
@@ -82,34 +111,47 @@ export function makeRegolithDetail(seed: number, size = 256): RegolithDetail {
       h[j * size + i] = noise(u, v) * 0.6 + noise(u * 2, v * 2) * 0.3;
     }
   }
-  // Craters: many small, few large. Bowl below the ground, raised rim around it.
-  const craters = 70;
+  // Craters: a power law, many small and few large. Bowl below the ground, raised rim around it.
+  const craters = Math.round(CRATER_COUNT * Math.max(0.2, look.craterDensity));
+  const rMax = CRATER_R_MAX * Math.max(0.3, look.craterScale);
   for (let c = 0; c < craters; c++) {
     const cx = rng.float(0, size);
     const cy = rng.float(0, size);
-    const r = 2.5 + 22 * Math.pow(rng.next(), 3);
-    const depth = r * 0.22;
-    const reach = Math.ceil(r * 1.7);
+    const r = craterRadius(rng.next(), CRATER_R_MIN, rMax);
+    const isFresh = r < 12 && rng.chance(FRESH_SHARE);
+    const depth = r * (isFresh ? 0.26 : 0.2);
+    const reach = Math.ceil(r * (isFresh ? 2.6 : 1.7));
     for (let dy = -reach; dy <= reach; dy++) {
       for (let dx = -reach; dx <= reach; dx++) {
         const px = Math.floor(cx) + dx;
         const py = Math.floor(cy) + dy;
         const d = Math.hypot(px + 0.5 - cx, py + 0.5 - cy) / r;
-        if (d > 1.7) continue;
-        let dh = 0;
-        if (d < 1) dh -= depth * (1 - d * d);
-        dh += depth * 0.35 * Math.exp(-(((d - 1) / 0.28) ** 2));
+        if (d > (isFresh ? 2.6 : 1.7)) continue;
         const ii = ((px % size) + size) % size;
         const jj = ((py % size) + size) % size;
-        h[jj * size + ii] = (h[jj * size + ii] as number) + dh;
+        const k = jj * size + ii;
+        if (d <= 1.7) {
+          let dh = 0;
+          if (d < 1) dh -= depth * (1 - d * d);
+          dh += depth * 0.35 * Math.exp(-(((d - 1) / 0.28) ** 2));
+          h[k] = (h[k] as number) + dh;
+        }
+        if (isFresh) {
+          let a = 0;
+          if (d < 0.8) a -= FRESH_ALBEDO * (1 - (d / 0.8) ** 2);
+          a += FRESH_ALBEDO * Math.exp(-(((d - 1) / 0.22) ** 2));
+          if (d > 1) a += 0.4 * FRESH_ALBEDO * Math.exp(-(d - 1) * 1.6);
+          fresh[k] = (fresh[k] as number) + a;
+        }
       }
     }
   }
   const normal = dataTexture(heightToNormals(h, size, 0.9), size, false);
-  // Brightness: crater floors a little darker, rims and grain a little brighter.
+  // Brightness: crater floors a little darker, rims and grain a little brighter, fresh craters
+  // with a dark floor and a bright rim (about +-12%).
   const alb = new Uint8Array(size * size * 4);
   for (let k = 0; k < size * size; k++) {
-    const v = Math.max(0, Math.min(1, 0.95 + (h[k] as number) * 0.04));
+    const v = Math.max(0, Math.min(1, 0.9 + (h[k] as number) * 0.04 + (fresh[k] as number)));
     const g = Math.round(v * 255);
     alb[k * 4] = g;
     alb[k * 4 + 1] = g;

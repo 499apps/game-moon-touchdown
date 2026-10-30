@@ -1,7 +1,17 @@
 /**
  * Moon Touchdown scene: real terrain under a low sun, a black sky with stars and the Earth, the
- * glowing target ring, the lander with plume, engine light and dust, the predicted touchdown
- * marker with its ghost trail, and a chase camera that drops low for the touchdown.
+ * glowing target ring, the lander with plume, engine light, halo and dust, the predicted
+ * touchdown marker with its ghost trail, a soft ground glow under the lander near the ground,
+ * and the camera.
+ *
+ * Camera, by phase:
+ * - pick: a slow orbit over the site.
+ * - ready: an establishing shot, low behind the lander, with the horizon and the Earth.
+ * - flying: a swoop (1.5 s, a cut with reduced motion) into the descent cam. High up it looks
+ *   steeply down so the lander and the ground under it are both in frame; from 80 m to 30 m it
+ *   blends into a low chase cam for the touchdown. Portrait keeps the ground point above the
+ *   bottom 30% of the frame (the touch controls).
+ * - landed: a low, slow orbit around the lander.
  *
  * The scene never changes the sim: each frame it draws the state it is given.
  */
@@ -19,9 +29,9 @@ import type { Terrain } from '../sim/terrain';
 import { Dust } from './dust';
 import { LanderModel } from './landerModel';
 import type { SunDirection } from './shade';
-import { Sky } from './sky';
-import { TerrainView, type Lod, type TerrainSource } from './terrainView';
-import { makeRegolithDetail, makeSoftSprite } from './textures';
+import { EARTH_AZIMUTH, Sky } from './sky';
+import { DEFAULT_LOOK, TerrainView, type Lod, type TerrainSource } from './terrainView';
+import { makeRegolithDetail, makeSoftSprite, type RegolithDetail } from './textures';
 
 export type ScenePhase = 'pick' | 'ready' | 'flying' | 'landed';
 
@@ -45,6 +55,14 @@ export interface MoonSceneOptions {
   frozen: boolean;
 }
 
+/** A world point on the screen: normalised device coordinates (-1..1, y up). */
+export interface ScreenPoint {
+  x: number;
+  y: number;
+  /** The point is behind the camera (x and y are then mirrored). */
+  behind: boolean;
+}
+
 /** Sun 12 degrees up, from the east-south-east: long shadows that run west across the view. */
 const SUN_AZIMUTH = 100 * DEG;
 const SUN_ELEVATION = 12 * DEG;
@@ -53,10 +71,34 @@ export const SUN: SunDirection = {
   z: -Math.cos(SUN_AZIMUTH),
   elevation: SUN_ELEVATION,
 };
+/** Sun strength: calibrated so flat lit ground reads as mid grey, not white. */
+const SUN_INTENSITY = 6.5;
 
 const LOD_BY_TIER: Readonly<Record<Tier, Lod>> = { high: 256, medium: 128, low: 64 };
 const TRAIL_MAX = 64;
 const UP = new THREE.Vector3(0, 1, 0);
+
+/** Camera: the descent cam above HIGH_CAM_H, the low chase cam below LOW_CAM_H (m). */
+const HIGH_CAM_H = 80;
+const LOW_CAM_H = 30;
+/** Descent cam: elevation of the camera seen from the lander, and its distance (m). */
+const HIGH_ELEVATION = 70 * DEG;
+const LOW_ELEVATION = 12 * DEG;
+const LOW_DISTANCE = 30;
+/** Keep the ground point this far (rad) inside the top or bottom of the frame. */
+const FRAME_MARGIN = 5 * DEG;
+/** Look targets sit this far (m) along the view direction. */
+const LOOK_DIST = 100;
+/** Ready shot: behind the lander toward the Earth, a little above it, looking a little down. */
+const READY_BACK = 150;
+const READY_UP = 12;
+const READY_PITCH = 8 * DEG;
+const SWOOP_TIME = 1.5;
+/** Lander halo: size on screen (px), faded out below these heights (m). */
+const HALO_PX = 52;
+const HALO_FADE = { low: 40, high: 90 } as const;
+/** Ground glow under the lander starts at this height (m). */
+const GLOW_HEIGHT = 40;
 
 const OUTCOME_COLOR = {
   soft: new THREE.Color(palette.lime),
@@ -77,23 +119,37 @@ export class MoonScene {
   private readonly dust: Dust;
   private readonly ring: THREE.Group;
   private readonly ringMat: THREE.MeshBasicMaterial;
+  private readonly beacon: THREE.Mesh;
   private readonly beaconMat: THREE.MeshBasicMaterial;
   private readonly marker: THREE.Mesh;
   private readonly markerMat: THREE.MeshBasicMaterial;
   private readonly trail: THREE.Line;
   private readonly trailPos: Float32Array;
+  private readonly halo: THREE.Sprite;
+  private readonly haloMat: THREE.SpriteMaterial;
+  private readonly groundGlow: THREE.Mesh;
+  private readonly groundGlowMat: THREE.MeshBasicMaterial;
   private readonly sprites: THREE.Texture[] = [];
+  private detail: RegolithDetail;
   private readonly camPos = new THREE.Vector3(0, 400, 900);
   private readonly camLook = new THREE.Vector3();
   private readonly wantPos = new THREE.Vector3();
   private readonly wantLook = new THREE.Vector3();
+  private readonly fromPos = new THREE.Vector3();
+  private readonly fromLook = new THREE.Vector3();
   private readonly tmp = new THREE.Vector3();
+  private readonly tmpQ = new THREE.Vector3();
   private terrain: Terrain | null = null;
+  private targetGround = 0;
   private snap = true;
   private puffed = false;
   private orbit = 0;
   private aspect = 16 / 9;
+  private viewHeight = 720;
   private particleScale: number;
+  private lastPhase: ScenePhase = 'pick';
+  /** Seconds into the ready-to-descent swoop; negative when no swoop runs. */
+  private swoop = -1;
 
   constructor(kit: KitRenderer, rng: Rng, o: MoonSceneOptions) {
     this.kit = kit;
@@ -115,7 +171,7 @@ export class MoonScene {
       Math.sin(SUN.elevation),
       SUN.z * Math.cos(SUN.elevation),
     ).normalize();
-    this.sun = new THREE.DirectionalLight('#fff4e2', 10);
+    this.sun = new THREE.DirectionalLight('#fff4e2', SUN_INTENSITY);
     this.sun.castShadow = kit.settings.shadows;
     this.sun.shadow.mapSize.set(kit.settings.shadowMapSize, kit.settings.shadowMapSize);
     const sc = this.sun.shadow.camera;
@@ -141,9 +197,8 @@ export class MoonScene {
     this.sky = new Sky(rng, this.sunDir, glow, 0.5 + 0.5 * this.particleScale);
     scene.add(this.sky.group);
 
-    const detail = makeRegolithDetail(rng.int(1, 1e9));
-    this.sprites.push(detail.normal, detail.albedo);
-    this.terrainView = new TerrainView(detail, LOD_BY_TIER[kit.settings.tier]);
+    this.detail = makeRegolithDetail(rng.int(1, 1e9), 256, DEFAULT_LOOK);
+    this.terrainView = new TerrainView(this.detail, LOD_BY_TIER[kit.settings.tier]);
     scene.add(this.terrainView.group);
 
     // Target ring (draped on the ground when a site loads) and a light beacon above it.
@@ -175,14 +230,52 @@ export class MoonScene {
       side: THREE.DoubleSide,
       toneMapped: false,
     });
-    const beacon = new THREE.Mesh(beaconGeo, this.beaconMat);
-    beacon.name = 'beacon';
-    beacon.position.y = 130;
-    this.ring.add(beacon);
+    this.beacon = new THREE.Mesh(beaconGeo, this.beaconMat);
+    this.beacon.name = 'beacon';
+    this.beacon.position.y = 130;
+    this.ring.add(this.beacon);
     scene.add(this.ring);
 
     this.lander = new LanderModel(rng.int(1, 1e9));
     scene.add(this.lander.root);
+
+    // A soft halo behind the lander, a fixed size on screen, so it reads from high up.
+    this.haloMat = new THREE.SpriteMaterial({
+      map: glow,
+      color: '#cfe6ff',
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: false,
+      toneMapped: false,
+    });
+    this.halo = new THREE.Sprite(this.haloMat);
+    this.halo.name = 'lander-halo';
+    this.halo.renderOrder = 3;
+    this.halo.visible = false;
+    scene.add(this.halo);
+
+    // A warm glow on the ground under the lander in the last 40 m (a visual aid).
+    this.groundGlowMat = new THREE.MeshBasicMaterial({
+      map: glow,
+      color: '#ffd9a0',
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      toneMapped: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    const glowGeo = new THREE.CircleGeometry(1, 40);
+    glowGeo.rotateX(-Math.PI / 2);
+    this.groundGlow = new THREE.Mesh(glowGeo, this.groundGlowMat);
+    this.groundGlow.name = 'ground-glow';
+    this.groundGlow.renderOrder = 2;
+    this.groundGlow.visible = false;
+    scene.add(this.groundGlow);
 
     this.dust = new Dust(rng, 600 * this.particleScale * (o.reducedMotion ? 0.35 : 1), dustSprite);
     scene.add(this.dust.points);
@@ -213,9 +306,15 @@ export class MoonScene {
     scene.add(this.marker, this.trail);
   }
 
-  /** Show a site: build the terrain meshes and drape the target ring on the real ground. */
+  /** Show a site: build the terrain meshes, its own ground detail, and drape the target ring. */
   setSite(src: TerrainSource): void {
     this.terrain = src.terrain;
+    // Each site has its own crater density, crater size and colours (decoration only).
+    const old = this.detail;
+    this.detail = makeRegolithDetail(src.seed, 256, src.look);
+    this.terrainView.setDetail(this.detail);
+    old.albedo.dispose();
+    old.normal.dispose();
     this.terrainView.setSource(src, this.rng);
     for (const child of this.ring.children.slice()) {
       if (child.name === 'ring') {
@@ -236,8 +335,8 @@ export class MoonScene {
     const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, segments, 0.9, 6, true), this.ringMat);
     tube.name = 'ring';
     this.ring.add(tube);
-    const beacon = this.ring.getObjectByName('beacon');
-    if (beacon) beacon.position.y = t.heightAt(0, 0) + 130;
+    this.targetGround = t.heightAt(0, 0);
+    this.setBeaconHeight(1, true);
     this.dust.clear();
     this.snap = true;
   }
@@ -249,6 +348,7 @@ export class MoonScene {
 
   resize(width: number, height: number): void {
     this.aspect = width / Math.max(1, height);
+    this.viewHeight = Math.max(1, height);
     const cam = this.kit.camera;
     // Portrait screens are narrow: a wider vertical view keeps the ground and the ring in frame.
     cam.fov = this.aspect < 1 ? 62 : 48;
@@ -259,7 +359,29 @@ export class MoonScene {
   resetRun(): void {
     this.snap = true;
     this.puffed = false;
+    this.swoop = -1;
     this.dust.clear();
+  }
+
+  /** Ground height (m) at a world point, or 0 before a site loads. */
+  groundAt(x: number, z: number): number {
+    return this.terrain ? this.terrain.heightAt(x, z) : 0;
+  }
+
+  /** Ground height (m) at the centre of the target ring. */
+  get targetHeight(): number {
+    return this.targetGround;
+  }
+
+  /** Project a world point with the camera of the last update. */
+  project(x: number, y: number, z: number, out: ScreenPoint): ScreenPoint {
+    const cam = this.kit.camera;
+    const v = this.tmp.set(x, y, z).applyMatrix4(cam.matrixWorldInverse);
+    out.behind = v.z > -cam.near;
+    v.applyMatrix4(cam.projectionMatrix);
+    out.x = Number.isFinite(v.x) ? v.x : 0;
+    out.y = Number.isFinite(v.y) ? v.y : 0;
+    return out;
   }
 
   update(dt: number, t: number, v: SceneView): void {
@@ -269,10 +391,18 @@ export class MoonScene {
     const motion = this.motion;
     const live = !this.frozen && !v.paused;
 
+    // Ready -> flying: swoop from the establishing shot into the descent cam (cut when reduced).
+    if (v.phase === 'flying' && this.lastPhase === 'ready') {
+      if (motion > 0) this.swoop = 0;
+      else this.snap = true;
+    }
+    if (v.phase !== 'flying') this.swoop = -1;
+    this.lastPhase = v.phase;
+
     // Lander pose, plus a spring dip (soft) or a kind little hop (bumpy) after touchdown.
     const root = this.lander.root;
     root.position.set(s.pos.x, s.pos.y, s.pos.z);
-    root.quaternion.setFromUnitVectors(UP, this.tmp.set(...thrustVec(s)));
+    root.quaternion.setFromUnitVectors(UP, this.tmpQ.set(...thrustVec(s)));
     this.lander.body.position.y = 0;
     if (v.phase === 'landed' && motion > 0) {
       const lt = v.landedFor;
@@ -322,14 +452,90 @@ export class MoonScene {
       (geo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     }
 
+    // The beacon reaches up toward the lander's start height, so the ready shot shows it.
+    if (v.phase === 'ready') this.setBeaconHeight(clamp((v.altitude * 0.85) / 260, 1, 2.6));
+    else if (v.phase === 'pick') this.setBeaconHeight(1);
     // Beacon fades as the lander gets low (it is there to find the ring from high up).
     this.beaconMat.opacity = v.phase === 'pick' ? 1 : clamp((v.altitude - 20) / 150, 0.15, 1);
     this.ringMat.opacity = 0.85 + (live && motion > 0 ? 0.1 * Math.sin(t * 3) : 0.1);
+
+    this.updateHalo(v);
+    this.updateGroundGlow(v, terrain);
 
     this.terrainView.updatePatch(s.pos.x, s.pos.z);
     this.updateCamera(dt, v, ground);
     this.updateSun(s);
     this.sky.update(this.kit.camera, live ? t : 0);
+  }
+
+  private setBeaconHeight(scale: number, force = false): void {
+    if (!force && Math.abs(this.beacon.scale.y - scale) < 1e-3) return;
+    this.beacon.scale.y = scale;
+    this.beacon.position.y = this.targetGround + 130 * scale;
+  }
+
+  private updateHalo(v: SceneView): void {
+    const on = v.phase === 'ready' || v.phase === 'flying';
+    const k = on ? smoothstep(HALO_FADE.low, HALO_FADE.high, v.altitude) : 0;
+    this.halo.visible = k > 0.01;
+    if (!this.halo.visible) return;
+    this.haloMat.opacity = 0.34 * k;
+    this.halo.position.copy(this.lander.root.position);
+    this.halo.position.y += 0.6;
+    // sizeAttenuation off: scale 1 spans (1 / tan(fov / 2)) half-heights of the view.
+    const p11 = 1 / Math.tan((this.kit.camera.fov * DEG) / 2);
+    this.halo.scale.setScalar((2 * HALO_PX) / (p11 * this.viewHeight));
+  }
+
+  private updateGroundGlow(v: SceneView, terrain: Terrain): void {
+    const on = v.phase === 'flying' && v.altitude < GLOW_HEIGHT;
+    this.groundGlow.visible = on;
+    if (!on) return;
+    const s = v.lander;
+    const k = 1 - Math.max(0, v.altitude) / GLOW_HEIGHT;
+    // It gets brighter and tighter as the lander comes down.
+    this.groundGlowMat.opacity = 0.1 + 0.45 * k * k;
+    this.groundGlow.scale.setScalar(lerp(10, 4.5, k));
+    this.groundGlow.position.set(s.pos.x, terrain.heightAt(s.pos.x, s.pos.z) + 0.4, s.pos.z);
+    const g = terrain.gradientAt(s.pos.x, s.pos.z, 3);
+    this.groundGlow.quaternion.setFromUnitVectors(UP, this.tmpQ.set(-g.dx, 1, -g.dz).normalize());
+  }
+
+  /** Establishing shot: behind the lander, looking toward the Earth and a little down. */
+  private readyPose(s: LanderState, pos: THREE.Vector3, look: THREE.Vector3): void {
+    const az = EARTH_AZIMUTH * 0.6;
+    const fx = Math.sin(az);
+    const fz = -Math.cos(az);
+    const back = READY_BACK * (this.aspect < 1 ? 1.15 : 1);
+    pos.set(s.pos.x - fx * back, s.pos.y + READY_UP, s.pos.z - fz * back);
+    const c = Math.cos(READY_PITCH) * LOOK_DIST;
+    look.set(pos.x + fx * c, pos.y - Math.sin(READY_PITCH) * LOOK_DIST, pos.z + fz * c);
+  }
+
+  /**
+   * Flight camera behind (south of) the lander, looking north. The pitch puts the lander and the
+   * ground point under it both in frame: steep high up (descent cam), low near the ground.
+   */
+  private flightPose(v: SceneView, ground: number, pos: THREE.Vector3, look: THREE.Vector3): void {
+    const s = v.lander;
+    const h = Math.max(0, v.altitude);
+    const portrait = this.aspect < 1;
+    const w = smoothstep(LOW_CAM_H, HIGH_CAM_H, h);
+    const highDist = clamp(45 + 0.12 * h, 60, 90);
+    const dist = lerp(LOW_DISTANCE, highDist, w) * (portrait ? 1.12 : 1);
+    const elev = lerp(LOW_ELEVATION, HIGH_ELEVATION, w);
+    const back = dist * Math.cos(elev);
+    const up = dist * Math.sin(elev);
+    pos.set(s.pos.x, s.pos.y + up, s.pos.z + back);
+    // Angles below the horizontal: to the lander and to the ground point under it.
+    const toLander = elev;
+    const toGround = Math.atan2(up + Math.max(0, s.pos.y - ground), back);
+    const half = (this.kit.camera.fov * DEG) / 2;
+    // Portrait: aim lower, so the ground point stays above the bottom 30% (the controls).
+    let pitch = lerp(toLander, toGround, portrait ? 0.62 : 0.5);
+    pitch = Math.max(pitch, toGround - (half - FRAME_MARGIN));
+    pitch = clamp(pitch, 4 * DEG, 86 * DEG);
+    look.set(pos.x, pos.y - Math.sin(pitch) * LOOK_DIST, pos.z - Math.cos(pitch) * LOOK_DIST);
   }
 
   private updateCamera(dt: number, v: SceneView, ground: number): void {
@@ -339,6 +545,7 @@ export class MoonScene {
     const portrait = this.aspect < 1 ? 1.18 : 1;
     const want = this.wantPos;
     const look = this.wantLook;
+    let direct = false;
     if (v.phase === 'pick') {
       // A slow orbit over the site that shows the ring and the lander waiting above it.
       if (!this.frozen && this.motion > 0) this.orbit += dt * 0.03;
@@ -357,20 +564,25 @@ export class MoonScene {
       const r = 26 * portrait;
       want.set(s.pos.x + Math.sin(a) * r, ground + 6.5, s.pos.z + Math.cos(a) * r);
       look.set(s.pos.x, s.pos.y + 0.4, s.pos.z);
+    } else if (v.phase === 'ready') {
+      this.orbit = 0;
+      this.readyPose(s, want, look);
     } else {
       this.orbit = 0;
-      const h = Math.max(0, v.altitude);
-      const dist = clamp(26 + h * 0.32, 26, 230) * portrait;
-      const k = smoothstep(0, 400, h);
-      const phi = lerp(0.14, 0.5, k);
-      want.set(s.pos.x, s.pos.y + dist * Math.sin(phi), s.pos.z + dist * Math.cos(phi));
-      const lh = Math.min(h, 300);
-      look.set(s.pos.x, s.pos.y - lh * 0.22, s.pos.z - lh * 0.12);
+      this.flightPose(v, ground, want, look);
+      if (this.swoop >= 0 && this.swoop < SWOOP_TIME) {
+        if (!v.paused) this.swoop += dt;
+        const k = easeInOut(clamp(this.swoop / SWOOP_TIME, 0, 1));
+        this.readyPose(s, this.fromPos, this.fromLook);
+        want.lerpVectors(this.fromPos, want, k);
+        look.lerpVectors(this.fromLook, look, k);
+        direct = true;
+      }
     }
     // Never below the ground.
     const floor = terrain.heightAt(want.x, want.z) + 4;
     if (want.y < floor) want.y = floor;
-    if (this.snap) {
+    if (this.snap || direct) {
       this.camPos.copy(want);
       this.camLook.copy(look);
       this.snap = false;
@@ -397,6 +609,8 @@ export class MoonScene {
       cam.near = near;
       cam.updateProjectionMatrix();
     }
+    // The page projects the ring and the marker for the edge arrows before the next render.
+    cam.updateMatrixWorld();
   }
 
   private updateSun(s: LanderState): void {
@@ -419,6 +633,11 @@ export class MoonScene {
     this.markerMat.dispose();
     this.trail.geometry.dispose();
     (this.trail.material as THREE.Material).dispose();
+    this.haloMat.dispose();
+    this.groundGlow.geometry.dispose();
+    this.groundGlowMat.dispose();
+    this.detail.albedo.dispose();
+    this.detail.normal.dispose();
     for (const tex of this.sprites) tex.dispose();
   }
 }
@@ -426,6 +645,10 @@ export class MoonScene {
 function smoothstep(a: number, b: number, x: number): number {
   const k = clamp((x - a) / (b - a), 0, 1);
   return k * k * (3 - 2 * k);
+}
+
+function easeInOut(k: number): number {
+  return k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
 }
 
 function thrustVec(s: LanderState): [number, number, number] {

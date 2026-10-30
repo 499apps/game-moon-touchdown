@@ -294,3 +294,42 @@ flowchart LR
 ```
 
 Do F-02 and F-13 first. They are small, and they make the R2 screenshots honest.
+
+## F1 changes
+
+Fix round F1 was done by editing files only. Nothing ran in this round (no typecheck, lint, unit tests, build or e2e). The operator runs them next. The visual baselines change, so run `pnpm e2e:update` after a human checks the new frames.
+
+| Id | Status | Note |
+| --- | --- | --- |
+| F-01 | DONE | Descent cam above 80 m (70°, 60-90 m), smoothstep blend to the low chase cam from 80 m to 30 m, ground point held in frame. Edge arrows for the ring (mint, metres) and the marker (`src/edgeArrows.ts`). Screenshot check is still to do. |
+| F-02 | DONE | Colour only on the spans, SVGs inherit. e2e checks the earned-star colour (lemon). |
+| F-03 | PARTIAL | Sun 6.5, exposure 0.9, regolith `#8e877d`, 2-scale rotated detail sampling, normal fade beyond 600 m, power-law craters with fresh craters (±12%), macro albedo ±12% in 3 octaves. The luminance metric in the kit look gate is not added (kit). The brightness is not measured yet. |
+| F-04 | PARTIAL | Skirt has both windings, discard rect 1 m inside the patch. The black-pixel count in the kit look gate is not added (kit). |
+| F-05 | DONE | Establishing shot toward the Earth; 1.5 s ease-in-out swoop; cut with reduced motion. Beacon reaches up to 85% of the start height in the ready shot. |
+| F-06 | DONE | Distance capped at 90 m; additive 52 px screen-space halo that fades out from 90 m to 40 m. |
+| F-07 | DONE | Fuel 370/330/300/270/265/275 kg (estimated from the helper's fuel use + margin). `src/sim/helper-sites.test.ts` asserts the fuel floors, the 60 s call-out on sites 4-6 (75% of runs) and the site-3 high hover. It prints the fuel used per site for re-tuning. |
+| F-08 | DONE | `vsBand(down, height)` with the helper envelope, strict below 10 m, bar green to the envelope, no blink with the helper, envelope band on the chart. Tests in `src/hud.test.ts`. |
+| F-09 | PARTIAL | Helped debrief copy with a tilt icon, ring arrow and tilt pad pulse once at 200 m. The optional "helper steers too" level is not done (open question 7). |
+| F-10 | DONE | Go, tap and tilt-only starts use the helper until the first unhelped soft landing (`progress.solo`). Ready tip "Help is on, slide to take over". Visible "Help" label, one-time pulse. |
+| F-11 | DONE | Test runs 16 seeds per site on the real `.bin`. `assist.ts` is unchanged until the test result is known. |
+| F-12 | DONE | Hadley fact, README and DESIGN corrected. |
+| F-13 | PARTIAL | Game-local `animation: none` for the card, earned stars and call-out in test mode; e2e opacity checks. The kit rule is not changed (kit). |
+| F-14 | DONE | Portrait aims lower so the ground point and marker stay above the bottom 30%. |
+| F-15 | DONE | Solid dark badge with a mint inset ring. |
+| F-16 | DONE | Portrait ready tip sits above the slider top. |
+| F-17 | PARTIAL | Game-local overlay top padding on phones and smaller site cards below 760 px height. The kit overlay rule is not changed. |
+| F-18 | DONE | Earth at 3.5° up, azimuth -0.18 rad (left of the HUD columns). |
+| F-19 | SKIPPED | The operator handles the terrain script. |
+| F-20 | DONE | `src/moonMap.ts` map on the picker and the debrief, "real ground" line, you-vs-crew line, 2-3 rotating facts and a "Talk about it" question per site. |
+| F-21 | DONE | Warm additive ground glow below 40 m, aligned to the slope. DESIGN says it is a visual aid. |
+| F-22 | DONE | New icon (lander in a cupped hand) and the visible "Help" label. `aria-pressed` kept. |
+| F-23 | PARTIAL | Progress schema v2 (`helped`, `solo`) with a v1 migration and tests; helper mark on the picker stars. The ghost trail of the best run is not done (optional). |
+| F-24 | DONE | Per-site regolith, fresh-slope colour, crater density and crater size in `SITES[].look`. |
+| F-25 | SKIPPED | Optional. The test state now has `ringOnScreen` and `markerOnScreen` for a later e2e. |
+| F-26 | DONE | Relative slider: the lever moves by the drag distance; a tap is a no-op. |
+| F-27 | DONE | Game-local rail title override (9 px, no letter spacing, whole words) so "Moon Touchdown" fits on 2 lines. |
+| F-28 | DONE | Second hum layer at 3× the pitch (× 0.4 volume) and a soft kit whoosh hiss at 30% throttle or more. |
+| F-29 | DONE | W/S engine only; arrows tilt in 4 directions; help card and README updated; E/Q and A/D still work. |
+| F-30 | DONE | Four points added to DESIGN section 9. |
+| F-31 | SKIPPED | Kit change. |
+| F-32 | DONE | `navigator.vibrate` on touchdown with touch controls on, sound on, reduced motion off and not in test mode. |

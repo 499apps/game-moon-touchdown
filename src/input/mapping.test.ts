@@ -57,10 +57,15 @@ describe('lever curve', () => {
 });
 
 describe('keyboard', () => {
-  it('maps W/S and arrows to the throttle, A/D and Q/E to tilt', () => {
+  it('maps W/S to the throttle and the arrows, I J K L, A/D and Q/E to tilt', () => {
     expect(mapKeyboard(new Set(['KeyW'])).leverRate).toBe(KEY_LEVER_RATE);
-    expect(mapKeyboard(new Set(['ArrowDown'])).leverRate).toBe(-KEY_LEVER_RATE);
+    expect(mapKeyboard(new Set(['KeyS'])).leverRate).toBe(-KEY_LEVER_RATE);
     expect(mapKeyboard(new Set(['KeyW', 'KeyS'])).leverRate).toBe(0);
+    // The arrows tilt in four directions and never move the throttle.
+    expect(mapKeyboard(new Set(['ArrowDown'])).leverRate).toBe(0);
+    expect(mapKeyboard(new Set(['ArrowUp'])).tiltZ).toBe(-KEY_TILT);
+    expect(mapKeyboard(new Set(['ArrowDown'])).tiltZ).toBe(KEY_TILT);
+    expect(mapKeyboard(new Set(['KeyK'])).tiltZ).toBe(KEY_TILT);
     expect(mapKeyboard(new Set(['KeyD'])).tiltX).toBe(KEY_TILT);
     expect(mapKeyboard(new Set(['ArrowLeft'])).tiltX).toBe(-KEY_TILT);
     expect(mapKeyboard(new Set(['KeyE'])).tiltZ).toBe(-KEY_TILT);

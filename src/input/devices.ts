@@ -67,9 +67,13 @@ export interface TouchElements {
 /** Pad radius (px) for full tilt. */
 const PAD_REACH = 56;
 
+/** Slider knob height (px), the same as the CSS. */
+const KNOB = 40;
+
 /**
- * Touch controls. The slider sets the lever while a finger is on it. The pad is relative: where
- * the thumb lands is the centre, and dragging away from it tilts the lander that way.
+ * Touch controls. Both are relative. The slider moves the lever by the drag distance from where
+ * the finger landed (a tap changes nothing, so the lever never jumps). The pad: where the thumb
+ * lands is the centre, and dragging away from it tilts the lander that way.
  */
 export class TouchControls {
   readonly state: TouchState = { slider: null, padX: 0, padY: 0 };
@@ -79,6 +83,9 @@ export class TouchControls {
   private sliderId: number | null = null;
   private padId: number | null = null;
   private padOrigin = { x: 0, y: 0 };
+  /** Lever on screen now, and the finger and lever at the start of a slider drag. */
+  private shownLever = 0;
+  private dragStart = { y: 0, lever: 0 };
 
   constructor(el: TouchElements) {
     this.el = el;
@@ -93,6 +100,7 @@ export class TouchControls {
       } catch {
         /* capture not supported */
       }
+      this.dragStart = { y: e.clientY, lever: this.shownLever };
       this.moveSlider(e);
     });
     s.addEventListener('pointermove', (e) => {
@@ -139,8 +147,9 @@ export class TouchControls {
 
   private moveSlider(e: PointerEvent): void {
     const r = this.el.slider.getBoundingClientRect();
-    const knob = 40;
-    const v = 1 - (e.clientY - r.top - knob / 2) / Math.max(1, r.height - knob);
+    // Relative: the lever moves by the drag distance over the slider travel (up = more).
+    const travel = Math.max(1, r.height - KNOB);
+    const v = this.dragStart.lever + (this.dragStart.y - e.clientY) / travel;
     this.state.slider = Math.max(0, Math.min(1, v));
     this.el.slider.classList.add('is-active');
   }
@@ -160,14 +169,16 @@ export class TouchControls {
 
   /** Show the lever position and the hover mark (both 0..1). */
   showLever(lever: number, hoverLever: number): void {
-    const pct = (Math.max(0, Math.min(1, lever)) * 100).toFixed(1);
+    this.shownLever = Math.max(0, Math.min(1, lever));
+    const pct = (this.shownLever * 100).toFixed(1);
     this.el.sliderFill.style.height = `${pct}%`;
-    this.el.sliderKnob.style.bottom = `calc(${pct}% - ${(lever * 40).toFixed(1)}px)`;
+    this.el.sliderKnob.style.bottom = `calc(${pct}% - ${(lever * KNOB).toFixed(1)}px)`;
     this.el.sliderHover.style.bottom = `${(Math.max(0, Math.min(1, hoverLever)) * 100).toFixed(1)}%`;
     this.el.slider.setAttribute('aria-valuenow', String(Math.round(lever * 100)));
   }
 
   reset(): void {
+    this.shownLever = 0;
     this.sliderId = null;
     this.padId = null;
     this.state.slider = null;

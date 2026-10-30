@@ -71,14 +71,17 @@ export const emptyIntent = (): Intent => ({ lever: null, leverRate: 0, tiltX: 0,
 
 export type KeyAction = 'throttleUp' | 'throttleDown' | 'tiltLeft' | 'tiltRight' | 'tiltAway' | 'tiltToward';
 
-/** KeyboardEvent.code values per action (documented in the help card). */
+/**
+ * KeyboardEvent.code values per action. The help card shows "W/S engine, arrow keys or I J K L
+ * tilt"; A/D and E/Q still work but are not shown (E/Q for away/toward was hard to remember).
+ */
 export const KEYS: Readonly<Record<KeyAction, readonly string[]>> = {
-  throttleUp: ['KeyW', 'ArrowUp'],
-  throttleDown: ['KeyS', 'ArrowDown'],
-  tiltLeft: ['KeyA', 'ArrowLeft', 'KeyJ'],
-  tiltRight: ['KeyD', 'ArrowRight', 'KeyL'],
-  tiltAway: ['KeyE', 'KeyI'],
-  tiltToward: ['KeyQ', 'KeyK'],
+  throttleUp: ['KeyW'],
+  throttleDown: ['KeyS'],
+  tiltLeft: ['ArrowLeft', 'KeyJ', 'KeyA'],
+  tiltRight: ['ArrowRight', 'KeyL', 'KeyD'],
+  tiltAway: ['ArrowUp', 'KeyI', 'KeyE'],
+  tiltToward: ['ArrowDown', 'KeyK', 'KeyQ'],
 };
 
 /** Every code the game reads as held (so the page can track only these). */

@@ -2,7 +2,11 @@
  * Flight HUD: height above the ground, speed down with green / yellow / red bands, a sideways
  * drift arrow, fuel in seconds with the 60 s mark, and a tilt ball. Colours and shapes first,
  * few words. Writes to the DOM only when a shown value changes.
+ *
+ * The speed-down bands follow the height: fast is fine high up, slow near the ground. The safe
+ * envelope is the hover helper's target speed, so correct helper flight always shows green.
  */
+import { assistTargetVs } from './sim/assist';
 import { MAX_TILT } from './sim/constants';
 import { moonIcon, type MoonIcon } from './icons';
 
@@ -20,20 +24,53 @@ export interface HudView {
   /** Applied throttle (0..1) and the throttle that would hover now. */
   throttle: number;
   hoverThrottle: number;
+  /** The hover helper flies the engine (the speed mark does not blink then). */
+  assist: boolean;
 }
 
-/** Speed-down scale of the bar (m/s) and its bands. */
+/** Speed-down bands near the ground (m/s): green under 2, yellow under 4. */
 export const VS_BAR_MAX = 8;
 export const VS_GREEN = 2;
 export const VS_YELLOW = 4;
+/** Below this height (m) the strict touchdown bands apply. */
+export const VS_STRICT_HEIGHT = 10;
+/** Above the safe envelope: green up to +0.5 m/s, yellow up to +2.5 m/s. */
+export const VS_GREEN_SLACK = 0.5;
+export const VS_YELLOW_SLACK = 2.5;
 
 export type Band = 'good' | 'warn' | 'bad';
 
-/** Colour band of a downward speed (m/s, >= 0). */
-export function vsBand(down: number): Band {
-  if (down < VS_GREEN) return 'good';
-  if (down < VS_YELLOW) return 'warn';
+export interface VsLimits {
+  /** Below this speed down (m/s) the band is green. */
+  green: number;
+  /** Below this speed down (m/s) the band is yellow; red above. */
+  yellow: number;
+}
+
+/** Safe speed down at a height (m/s): the helper's target, never below the touchdown limit. */
+export function vsEnvelope(height: number): number {
+  return Math.max(VS_GREEN, -assistTargetVs(height));
+}
+
+/** The green and yellow limits for speed down at a height above the ground. */
+export function vsLimits(height: number): VsLimits {
+  const h = Number.isFinite(height) ? height : 0;
+  if (h < VS_STRICT_HEIGHT) return { green: VS_GREEN, yellow: VS_YELLOW };
+  const safe = vsEnvelope(h);
+  return { green: safe + VS_GREEN_SLACK, yellow: safe + VS_YELLOW_SLACK };
+}
+
+/** Colour band of a downward speed (m/s, >= 0) at a height (m). Height 0 = touchdown rules. */
+export function vsBand(down: number, height = 0): Band {
+  const lim = vsLimits(height);
+  if (down < lim.green) return 'good';
+  if (down < lim.yellow) return 'warn';
   return 'bad';
+}
+
+/** Full scale of the speed bar (m/s): twice the yellow limit, so red is always the right half. */
+export function vsBarMax(height: number): number {
+  return Math.max(VS_BAR_MAX, 2 * vsLimits(height).yellow);
 }
 
 function must<T extends Element>(root: ParentNode, selector: string): T {
@@ -48,6 +85,7 @@ export class Hud {
   private readonly vsValue: HTMLElement;
   private readonly vsIcon: HTMLElement;
   private readonly vsMark: HTMLElement;
+  private readonly vsBar: HTMLElement;
   private readonly vsGauge: HTMLElement;
   private readonly driftValue: HTMLElement;
   private readonly driftArrow: SVGGElement;
@@ -70,6 +108,7 @@ export class Hud {
     this.vsValue = must<HTMLElement>(root, '#vs-value');
     this.vsIcon = must<HTMLElement>(root, '#vs-icon');
     this.vsMark = must<HTMLElement>(root, '#vs-mark');
+    this.vsBar = must<HTMLElement>(root, '.mt-vs-bar');
     this.vsGauge = must<HTMLElement>(root, '.mt-vs');
     this.driftValue = must<HTMLElement>(root, '#drift-value');
     this.driftArrow = must<SVGGElement>(root, '#drift-arrow');
@@ -108,8 +147,13 @@ export class Hud {
     const climbing = v.vy > 0.05;
     this.put('vs', Math.abs(v.vy).toFixed(1), (s) => (this.vsValue.textContent = s));
     this.put('vs-icon', climbing ? 'up' : 'down', (s) => (this.vsIcon.innerHTML = moonIcon(s === 'up' ? 'up' : 'down')));
-    this.put('vs-band', climbing ? 'good' : vsBand(down), (s) => (this.vsGauge.dataset['band'] = s));
-    const vsPos = Math.min(1, down / VS_BAR_MAX);
+    this.put('vs-band', climbing ? 'good' : vsBand(down, alt), (s) => (this.vsGauge.dataset['band'] = s));
+    this.put('assist', v.assist ? 'on' : 'off', (s) => (this.root.dataset['assist'] = s));
+    // The green part of the bar reaches the safe speed for this height.
+    const lim = vsLimits(alt);
+    const barMax = vsBarMax(alt);
+    this.put('vs-green', ((lim.green / barMax) * 100).toFixed(1), (s) => this.vsBar.style.setProperty('--mt-vs-green', `${s}%`));
+    const vsPos = Math.min(1, down / barMax);
     this.put('vs-mark', (vsPos * 100).toFixed(1), (s) => (this.vsMark.style.left = `${s}%`));
 
     const hs = Math.hypot(v.vx, v.vz);

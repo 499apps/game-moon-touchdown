@@ -3,9 +3,12 @@
  * the real terrain for a site, then runs the flight: input -> pure sim (src/sim) -> scene, HUD,
  * sounds, call-outs and the debrief.
  *
- * Controls: left slider / W S / left stick = engine; right pad / A D Q E / right stick = tilt;
- * the big helper button, Space or gamepad A = hover helper; P pauses. Sites, pause, restart,
- * helper, touch pad, help, sound, home and clear-data live in the left rail.
+ * Controls: left slider / W S / left stick = engine; right pad / arrow keys / I J K L / right
+ * stick = tilt; the big Help button, Space or gamepad A = hover helper; P pauses. Sites, pause,
+ * restart, help, touch pad, how to fly, sound, home and clear-data live in the left rail.
+ *
+ * Until the player has landed softly once without the helper, Go starts with the helper on (the
+ * engine is never off by surprise). Moving the throttle takes over the engine at once.
  */
 import './kit/styles.css';
 import './game.css';
@@ -14,13 +17,16 @@ import { hashSeed, createRng } from './kit/prng';
 import { createShell } from './kit/shell';
 import { createStage } from './kit/stage';
 import { readTestMode } from './kit/test-mode';
+import { EdgeArrow, placeEdge, type Insets } from './edgeArrows';
 import { drawDescentChart } from './graphs';
 import { Hud } from './hud';
 import { moonIcon, type MoonIcon } from './icons';
 import { HeldKeys, TouchControls, collectIntent } from './input/devices';
 import { ControlShaper, throttleToLever } from './input/mapping';
+import { moonMapSvg } from './moonMap';
 import {
   CONTROLS_KEY,
+  bestHelped,
   bestStars,
   emptyProgress,
   isUnlocked,
@@ -28,7 +34,7 @@ import {
   recordRun,
   saveProgress,
 } from './progress';
-import { MoonScene, SUN, type ScenePhase } from './scene/moonScene';
+import { MoonScene, SUN, type ScenePhase, type ScreenPoint } from './scene/moonScene';
 import { bakeSunShadow } from './scene/shade';
 import type { TerrainSource } from './scene/terrainView';
 import { DT, LEG_DROP } from './sim/constants';
@@ -36,7 +42,16 @@ import { Flight, type FlightEvent, type FlightResult, type PilotInput } from './
 import { BUMP_TEXT } from './sim/judge';
 import { createLander, hoverThrottle, type LanderState } from './sim/lander';
 import { predictTouchdown, type Prediction } from './sim/predictor';
-import { GRAVITY_FACT, GRID, SITES, startConditions, type SiteInfo } from './sim/sites';
+import {
+  GRAVITY_FACT,
+  GRID,
+  REAL_GROUND_FACT,
+  SITES,
+  crewLine,
+  factFor,
+  startConditions,
+  type SiteInfo,
+} from './sim/sites';
 import { Terrain } from './sim/terrain';
 import { MoonSounds } from './sound';
 
@@ -46,10 +61,15 @@ type Phase = ScenePhase;
 const DEBRIEF_DELAY = 1.6;
 /** Seconds a fuel call-out stays on screen. */
 const CALLOUT_TIME = 2.6;
-/** Seconds between touchdown predictions. */
+/** Seconds between touchdown predictions, and how far ahead they look (s). */
 const PREDICT_EVERY = 0.1;
+const PREDICT_HORIZON = 110;
 /** Frames the test API suggests per step call (the sim is cheap). */
 const TEST_STEP_FRAMES = 600;
+/** During a helper flight, the ring arrow and the tilt pad pulse once at this height (m). */
+const STEER_HINT_HEIGHT = 200;
+/** The helper counts as "flew the landing" when it was on below this height (m). */
+const HELPED_HEIGHT = 60;
 
 function must<T extends Element>(selector: string): T {
   const el = document.querySelector<T>(selector);
@@ -86,6 +106,15 @@ const statTime = must<HTMLElement>('#stat-time');
 const chartEl = must<HTMLCanvasElement>('#chart');
 const factSite = must<HTMLElement>('#fact-site');
 const factGravity = must<HTMLElement>('#fact-gravity');
+const factMap = must<HTMLElement>('#fact-map');
+const factReal = must<HTMLElement>('#fact-real');
+const factCrew = must<HTMLElement>('#fact-crew');
+const factTalkText = must<HTMLElement>('#fact-talk-text');
+const readyTipHelp = must<HTMLElement>('#ready-tip-help');
+const readyTipSolo = must<HTMLElement>('#ready-tip-solo');
+const tiltPadEl = must<HTMLElement>('#tilt-pad');
+const edgeRing = new EdgeArrow(must<HTMLElement>('#edge-ring'));
+const edgeMarker = new EdgeArrow(must<HTMLElement>('#edge-marker'));
 const retryBtn = must<HTMLButtonElement>('#retry');
 const nextBtn = must<HTMLButtonElement>('#next-site');
 const sitesBtn = must<HTMLButtonElement>('#open-sites');
@@ -121,6 +150,18 @@ let lastInput: PilotInput = { throttle: 0, tiltX: 0, tiltZ: 0, tiltActive: false
 let touchOn = false;
 let progress = emptyProgress();
 let scene: MoonScene | null = null;
+/** The helper flew the landing in this run (on below HELPED_HEIGHT or at touchdown). */
+let helpedRun = false;
+/** The 200 m steering hint already played in this run. */
+let steerHinted = false;
+/** The Help button pulsed once on the first ready screen of this page. */
+let helpPulsed = false;
+/** Edge arrows: the ring and the marker are inside the usable frame. */
+let ringOnScreen = false;
+let markerOnScreen = false;
+let stageBox = { left: 0, top: 0, width: 1, height: 1 };
+const ringPoint: ScreenPoint = { x: 0, y: 0, behind: false };
+const markerPoint: ScreenPoint = { x: 0, y: 0, behind: false };
 const sources = new Map<string, TerrainSource>();
 const shaper = new ControlShaper();
 const keys = new HeldKeys();
@@ -154,7 +195,7 @@ const shell = createShell({
         if (flight) void selectSite(siteIdx);
       },
     },
-    { kind: 'button', id: 'assist', label: 'Helper', icon: 'games', onSelect: () => setAssist(!assist) },
+    { kind: 'button', id: 'assist', label: 'Help', icon: 'games', onSelect: () => setAssist(!assist) },
     { kind: 'button', id: 'controls', label: 'Touch pad', icon: 'games', onSelect: () => setTouch(!touchOn) },
     { kind: 'button', id: 'help', label: 'How to fly', icon: 'info', onSelect: () => openHelp() },
   ],
@@ -184,7 +225,8 @@ const stage = createStage({
   label: 'Moon landing view',
   fallback: { title: 'Moon Touchdown', text: 'This game needs WebGL, which this browser does not offer.' },
   renderer: {
-    exposure: 1,
+    // Calibrated with the sun (6.5) and the regolith colours: lit flat ground is mid grey.
+    exposure: 0.9,
     bloom: { strength: 0.45, radius: 0.4, threshold: 0.92 },
     vignette: 0.38,
     clearColor: '#03040b',
@@ -224,7 +266,7 @@ async function loadSource(site: SiteInfo): Promise<TerrainSource> {
     console.warn(`moon-touchdown: terrain for ${site.slug} is not available, using stand-in hills`, err);
     terrain = standIn();
   }
-  const src: TerrainSource = { terrain, lit: bakeSunShadow(terrain, SUN), seed: hashSeed(site.slug) };
+  const src: TerrainSource = { terrain, lit: bakeSunShadow(terrain, SUN), seed: hashSeed(site.slug), look: site.look };
   sources.set(site.slug, src);
   return src;
 }
@@ -269,6 +311,13 @@ function prepareRun(site: SiteInfo, src: TerrainSource): void {
   landedFor = 0;
   debriefShown = false;
   calloutLeft = 0;
+  helpedRun = false;
+  steerHinted = false;
+  edgeRing.pulse(false);
+  tiltPadEl.classList.remove('is-pulse');
+  // The first ready screen of a new player: the Help button pulses once.
+  assistBtn.classList.toggle('is-pulse', !helpPulsed && !progress.solo);
+  helpPulsed = true;
   shaper.reset(0);
   touch.reset();
   keys.clear();
@@ -286,8 +335,15 @@ function prepareRun(site: SiteInfo, src: TerrainSource): void {
 function startFlight(): void {
   if (phase !== 'ready' || !flight) return;
   phase = 'flying';
+  assistBtn.classList.remove('is-pulse');
   sounds.start();
   updateUi();
+}
+
+/** Go (button, tap, Space): new players start with the helper on, so the engine is never off. */
+function goWithDefaultHelp(forceHelp: boolean): void {
+  if (forceHelp || !progress.solo) setAssist(true);
+  startFlight();
 }
 
 function setAssist(on: boolean): void {
@@ -343,10 +399,16 @@ function onTouchdown(r: FlightResult): void {
   phase = 'landed';
   prediction = null;
   landedFor = 0;
+  if (assist) helpedRun = true;
+  const soft = r.verdict.outcome === 'soft';
   sounds.touchdown();
-  if (r.verdict.outcome === 'soft') sounds.soft();
+  if (soft) sounds.soft();
   else sounds.bumpy();
-  progress = recordRun(progress, siteIdx, r.verdict.outcome === 'soft', r.stars.stars);
+  // A short buzz on phones that have it (Android). No network, no permission.
+  if (touchOn && !shell.synth.muted && !shell.reducedMotion && !testMode.enabled) {
+    navigator.vibrate?.(soft ? 30 : [40, 60, 40]);
+  }
+  progress = recordRun(progress, siteIdx, soft, r.stars.stars, helpedRun);
   saveProgress(shell.storage, progress);
   renderPicker();
   updateUi();
@@ -405,14 +467,17 @@ function renderPicker(): void {
     const open = isUnlocked(progress, i);
     const best = bestStars(progress, s.slug);
     const busy = loading === s.slug;
+    const helped = best > 0 && bestHelped(progress, s.slug);
     const label = open
-      ? `${s.name}, difficulty ${s.difficulty} of ${SITES.length}, best ${best} of 3 stars`
+      ? `${s.name}, difficulty ${s.difficulty} of ${SITES.length}, best ${best} of 3 stars${helped ? ', with help' : ''}`
       : `${s.name}, locked: land softly on the site before it`;
+    const helpMark = helped ? `<span class="mt-site-helped">${moonIcon('assist', 'g499-icon-svg')}</span>` : '';
     return `<button type="button" class="mt-site${open ? '' : ' is-locked'}${busy ? ' is-loading' : ''}${i === siteIdx ? ' is-current' : ''}" data-index="${i}" data-slug="${s.slug}" aria-label="${label}"${open ? '' : ' aria-disabled="true"'}>
+      <span class="mt-site-map" aria-hidden="true">${moonMapSvg(s.lat, s.lon, 'mt-site-map-svg')}</span>
       <span class="mt-site-emblem" data-level="${s.difficulty}">${open ? moonIcon('lander', 'mt-site-svg') : moonIcon('lock', 'mt-site-svg')}</span>
       <span class="mt-site-name">${s.name}</span>
       <span class="mt-site-dots" aria-hidden="true">${difficultyDots(s.difficulty)}</span>
-      <span class="mt-site-stars" aria-hidden="true">${starRow(best, 'mt-site-star')}</span>
+      <span class="mt-site-stars" aria-hidden="true">${starRow(best, 'mt-site-star')}${helpMark}</span>
     </button>`;
   });
   siteGrid.innerHTML = cards.join('');
@@ -428,14 +493,27 @@ function showDebrief(): void {
   outcomeIcon.innerHTML = moonIcon(soft ? 'star' : 'boing', 'g499-icon-svg', soft);
   outcomeTitle.textContent = soft ? (r.stars.stars === 3 ? 'Perfect touchdown!' : 'Soft touchdown!') : 'Bumpy landing';
   let reason = '';
+  let reasonIcon: MoonIcon | null = null;
   if (!soft) {
     reason = r.verdict.reasons.map((k) => BUMP_TEXT[k]).slice(0, 2).join(' ');
   } else if (!r.stars.close) {
-    reason = 'Land inside the green ring for another star.';
+    // Say who steers: the helper flies the engine only, the child tilts toward the ring.
+    reason = helpedRun
+      ? 'The helper flies the engine. You steer: tilt toward the ring.'
+      : 'Land inside the green ring for another star.';
+    reasonIcon = helpedRun ? 'tilt' : 'target';
   } else if (!r.stars.fuel) {
     reason = 'Keep 30 seconds of fuel for another star.';
+    reasonIcon = 'fuel';
   }
-  outcomeReason.textContent = reason;
+  outcomeReason.textContent = '';
+  if (reasonIcon) {
+    const icon = document.createElement('span');
+    icon.className = 'mt-reason-icon';
+    icon.innerHTML = moonIcon(reasonIcon);
+    outcomeReason.append(icon);
+  }
+  outcomeReason.append(document.createTextNode(reason));
   outcomeReason.hidden = reason === '';
   starsEl.innerHTML = starRow(r.stars.stars, 'mt-star');
   starsEl.setAttribute('aria-label', `${r.stars.stars} of 3 stars`);
@@ -444,8 +522,13 @@ function showDebrief(): void {
   statDist.textContent = `${Math.round(r.distance)} m`;
   statFuel.textContent = `${Math.floor(r.touchdown.fuelSeconds)} s`;
   statTime.textContent = `${Math.round(r.touchdown.time)} s`;
-  factSite.textContent = site.fact;
+  factMap.innerHTML = moonMapSvg(site.lat, site.lon, 'mt-fact-map-svg', `Where ${site.name} is on the Moon`);
+  factSite.textContent = factFor(site, runCount - 1);
+  factReal.textContent = REAL_GROUND_FACT;
+  factCrew.textContent = soft ? crewLine(site, r.touchdown.vs) : '';
+  factCrew.hidden = !soft;
   factGravity.textContent = GRAVITY_FACT;
+  factTalkText.textContent = site.talk;
   const next = siteIdx + 1;
   nextBtn.disabled = !(next < SITES.length && isUnlocked(progress, next));
   debriefEl.hidden = false;
@@ -487,6 +570,9 @@ function updateUi(): void {
   const cardOpen = !pickerEl.hidden || !helpEl.hidden;
   hud.setVisible(phase !== 'pick');
   readyEl.hidden = phase !== 'ready' || paused || cardOpen;
+  // New players: "Help is on, slide to take over". After a solo landing: the touchdown goals.
+  readyTipHelp.hidden = progress.solo;
+  readyTipSolo.hidden = !progress.solo;
   // The pause card waits under the site picker and the help card.
   pauseOverlay.hidden = !paused || cardOpen;
   const showTouch = touchOn && flyingish && !paused;
@@ -511,15 +597,25 @@ function update(dt: number): void {
   const f = flight;
   if (f && phase === 'ready' && !paused && !cardOpen()) {
     const intent = collectIntent(keys, touchOn ? touch : null);
-    // Any engine or tilt input starts the descent.
-    if (intent.leverRate > 0 || (intent.lever !== null && intent.lever > 0.05) || Math.hypot(intent.tiltX, intent.tiltZ) > 0.2) {
+    // Any engine or tilt input starts the descent. Engine input flies by hand; a tilt-only start
+    // keeps the default helper for new players, so the engine is not off by surprise.
+    const engine = intent.leverRate > 0 || (intent.lever !== null && intent.lever > 0.05);
+    if (engine || Math.hypot(intent.tiltX, intent.tiltZ) > 0.2) {
       actions++;
-      startFlight();
+      if (engine) startFlight();
+      else goWithDefaultHelp(false);
     }
   }
   if (f && phase === 'flying' && !paused) {
     const intent = collectIntent(keys, touchOn ? touch : null);
     if (assist && (intent.lever !== null || intent.leverRate !== 0)) setAssist(false);
+    if (assist && f.altitude < HELPED_HEIGHT) helpedRun = true;
+    // Helper flight: at 200 m, pulse the ring arrow and the tilt pad once ("you steer").
+    if (assist && !steerHinted && f.altitude < STEER_HINT_HEIGHT) {
+      steerHinted = true;
+      edgeRing.pulse(true);
+      tiltPadEl.classList.add('is-pulse');
+    }
     const c = shaper.update(intent, dt);
     lastInput = { throttle: c.throttle, tiltX: c.tiltX, tiltZ: c.tiltZ, tiltActive: c.tiltActive, assist };
     stepCarry += dt;
@@ -531,7 +627,7 @@ function update(dt: number): void {
       predictClock += dt;
       if (predictClock >= PREDICT_EVERY - 1e-9) {
         predictClock = 0;
-        prediction = predictTouchdown(f.terrain, f.state, lastInput, f.assistMemory(), { horizon: 75 });
+        prediction = predictTouchdown(f.terrain, f.state, lastInput, f.assistMemory(), { horizon: PREDICT_HORIZON });
       }
     }
   }
@@ -558,6 +654,7 @@ function update(dt: number): void {
       tiltZ: s.tiltZ,
       throttle: phase === 'flying' ? s.throttle : 0,
       hoverThrottle: hoverThrottle(s),
+      assist,
     });
     if (touchOn) {
       const lever = assist ? throttleToLever(s.throttle) : shaper.leverPosition;
@@ -586,8 +683,12 @@ if (stage.kit) {
         outcome: flight?.result?.verdict.outcome ?? null,
         paused,
       });
+      updateEdges(s);
     },
-    onResize: (w, h) => s.resize(w, h),
+    onResize: (w, h) => {
+      s.resize(w, h);
+      measureStage();
+    },
     onTierChange: (tier) => s.setTier(tier),
     dispose: () => {
       s.dispose();
@@ -606,6 +707,60 @@ if (stage.kit) {
   if (!shell.testMode.frozen) requestAnimationFrame(tick);
 }
 
+// ---------- Edge arrows ----------
+
+function measureStage(): void {
+  const r = stageHost.getBoundingClientRect();
+  stageBox = { left: r.left, top: r.top, width: Math.max(1, r.width), height: Math.max(1, r.height) };
+}
+
+/** The usable frame: below the HUD, above the touch controls, inside the safe areas. */
+function edgeInsets(): Insets {
+  const w = stageBox.width;
+  const h = stageBox.height;
+  const phone = window.innerWidth < 720;
+  const side = phone ? 44 : 28;
+  let bottom = 28;
+  if (touchOn) bottom = h > w ? h * 0.3 : 130;
+  else if (!assistBtn.hidden) bottom = 120;
+  return { top: phone ? 150 : 96, right: side, bottom, left: side };
+}
+
+function updateEdges(s: MoonScene): void {
+  const f = flight;
+  if (!f || (phase !== 'ready' && phase !== 'flying') || paused || cardOpen()) {
+    edgeRing.hide();
+    edgeMarker.hide();
+    ringOnScreen = false;
+    markerOnScreen = false;
+    return;
+  }
+  const inset = edgeInsets();
+  s.project(0, s.targetHeight + 1, 0, ringPoint);
+  const pr = placeEdge(ringPoint.x, ringPoint.y, ringPoint.behind, stageBox.width, stageBox.height, inset);
+  ringOnScreen = pr.onScreen;
+  if (pr.onScreen) edgeRing.hide();
+  else {
+    const away = Math.hypot(f.state.pos.x, f.state.pos.z);
+    edgeRing.show(stageBox.left + pr.x, stageBox.top + pr.y, pr.angle, `${Math.round(away)} m`);
+  }
+  const p = phase === 'flying' ? prediction : null;
+  if (!p) {
+    edgeMarker.hide();
+    markerOnScreen = false;
+    return;
+  }
+  s.project(p.x, s.groundAt(p.x, p.z) + 0.5, p.z, markerPoint);
+  const pm = placeEdge(markerPoint.x, markerPoint.y, markerPoint.behind, stageBox.width, stageBox.height, inset);
+  markerOnScreen = pm.onScreen;
+  if (pm.onScreen) edgeMarker.hide();
+  else {
+    const band = p.outcome === 'soft' ? 'good' : p.vs < 4 ? 'warn' : 'bad';
+    if (edgeMarker.element.dataset['band'] !== band) edgeMarker.element.dataset['band'] = band;
+    edgeMarker.show(stageBox.left + pm.x, stageBox.top + pm.y, pm.angle);
+  }
+}
+
 /** A card (site picker, help, debrief) is open: flight keys do nothing until it closes. */
 function cardOpen(): boolean {
   return !pickerEl.hidden || !helpEl.hidden || !debriefEl.hidden;
@@ -619,8 +774,7 @@ function onPrimary(source: InputSource): void {
   }
   const fromButton = source === 'keyboard' || source === 'gamepad' || source === 'ui';
   if (phase === 'ready') {
-    if (fromButton) setAssist(true);
-    startFlight();
+    goWithDefaultHelp(fromButton);
     return;
   }
   if (phase === 'flying' && fromButton) setAssist(!assist);
@@ -666,7 +820,7 @@ helpClose.addEventListener('click', () => {
 });
 goBtn.addEventListener('click', () => {
   actions++;
-  startFlight();
+  goWithDefaultHelp(false);
 });
 assistBtn.addEventListener('click', () => {
   actions++;
@@ -707,6 +861,7 @@ document.addEventListener('visibilitychange', () => {
 renderRailIcons();
 renderPicker();
 pickerEl.hidden = false;
+measureStage();
 updateUi();
 
 function testState(): Record<string, unknown> {
@@ -728,6 +883,10 @@ function testState(): Record<string, unknown> {
     tick: f ? f.tick : 0,
     paused,
     assist,
+    helped: helpedRun,
+    solo: progress.solo,
+    ringOnScreen,
+    markerOnScreen,
     debrief: !debriefEl.hidden,
     unlocked: progress.unlocked,
     touchControls: touchOn,

@@ -3,7 +3,8 @@
  * sun glow low in the east. The group follows the camera so the sky is always "infinitely" far.
  *
  * Artistic note: from these near-side sites the real Earth stands high overhead. It is placed
- * low here (about 9 degrees up, ahead of the camera) so players can see it.
+ * low here (about 3.5 degrees up, a little left of north, ahead of the camera) so players can
+ * see it in the clear band between the horizon and the HUD, even in the low touchdown view.
  */
 import * as THREE from 'three';
 import type { Rng } from '../kit/prng';
@@ -12,6 +13,9 @@ import { makeEarthTexture } from './textures';
 const SKY_RADIUS = 30_000;
 const EARTH_DISTANCE = 26_000;
 const EARTH_RADIUS = 620;
+/** Earth direction: azimuth from north (rad, + = east) and elevation (rad). */
+export const EARTH_AZIMUTH = -0.18;
+export const EARTH_ELEVATION = (3.5 * Math.PI) / 180;
 
 export class Sky {
   readonly group = new THREE.Group();
@@ -69,8 +73,8 @@ export class Sky {
         emissiveIntensity: 0.5,
       }),
     );
-    const az = 0.26;
-    const el = (9 * Math.PI) / 180;
+    const az = EARTH_AZIMUTH;
+    const el = EARTH_ELEVATION;
     this.earth.position.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).multiplyScalar(EARTH_DISTANCE);
     this.earth.rotation.set(0.35, 1.2, 0.1);
     const halo = new THREE.Sprite(

@@ -1,7 +1,11 @@
 /**
- * The six landing sites, easiest first, with their start ranges and fact cards. Grid facts
- * (256 x 256, 60 m, 0.5 m units) match public/data/terrain/sites.json. Start conditions come
- * from a seeded PRNG, so a seed replays the same approach.
+ * The six landing sites, easiest first, with their start ranges, fact cards and look. Grid
+ * facts (256 x 256, 60 m, 0.5 m units) match public/data/terrain/sites.json. Start conditions
+ * come from a seeded PRNG, so a seed replays the same approach.
+ *
+ * Fuel per site = what the hover helper uses on the real terrain plus a margin that shrinks
+ * with difficulty (about 90 s at site 1 down to about 35 s at site 6). src/sim/helper-sites.test.ts
+ * checks it: sites 1-3 land with 30 s or more, sites 4-6 with 10 s or more and the 60 s call-out.
  */
 import type { Rng } from '../kit/prng';
 import type { StartConditions } from './flight';
@@ -10,6 +14,17 @@ import type { Terrain } from './terrain';
 export interface Range {
   min: number;
   max: number;
+}
+
+/** How the ground looks at a site (decoration only, never the heights). */
+export interface SiteLook {
+  /** Regolith colour on flat ground (sRGB hex). Maria are darker and warmer. */
+  regolith: string;
+  /** Colour on steep, fresh slopes (sRGB hex). */
+  fresh: string;
+  /** Crater count and crater size in the detail map, relative to 1. */
+  craterDensity: number;
+  craterScale: number;
 }
 
 export interface SiteInfo {
@@ -30,8 +45,13 @@ export interface SiteInfo {
   descent: Range;
   /** Fuel at the start (kg). */
   fuel: number;
-  /** One short, true fact for the debrief card. */
-  fact: string;
+  /** Two or three short, true facts for the debrief card (one per run, in turn). */
+  facts: readonly string[];
+  /** One question a parent can ask after the landing. */
+  talk: string;
+  /** A real touchdown speed at this site (m/s), when a good figure is known. */
+  crewVs?: number;
+  look: SiteLook;
 }
 
 export const GRID = { size: 256, spacing: 60, unit: 0.5 } as const;
@@ -47,8 +67,15 @@ export const SITES: readonly SiteInfo[] = [
     offset: { min: 40, max: 120 },
     drift: { min: 0.5, max: 2 },
     descent: { min: 6, max: 9 },
-    fuel: 900,
-    fact: 'People first landed on the Moon here in July 1969. The ground is a wide, flat plain of old, dark lava.',
+    fuel: 370,
+    facts: [
+      'People first landed on the Moon here in July 1969. The ground is a wide, flat plain of old, dark lava.',
+      'The first crew left a mirror here. Scientists still bounce laser light off it to measure how far away the Moon is.',
+      'The first crew left footprints here. With no wind or rain on the Moon, footprints can last for a very long time.',
+    ],
+    talk: 'Why does the lander need only a small push to hover here?',
+    crewVs: 0.5,
+    look: { regolith: '#857e74', fresh: '#a39d93', craterDensity: 0.8, craterScale: 0.8 },
   },
   {
     slug: 'storms',
@@ -60,8 +87,13 @@ export const SITES: readonly SiteInfo[] = [
     offset: { min: 80, max: 200 },
     drift: { min: 1, max: 3 },
     descent: { min: 7, max: 10 },
-    fuel: 820,
-    fact: 'A crew landed here in November 1969, a short walk from a robot lander that arrived in 1967. They brought parts of it home.',
+    fuel: 330,
+    facts: [
+      'A crew landed here in November 1969, a short walk from a robot lander that arrived in 1967. They brought parts of it home.',
+      'The Ocean of Storms is the biggest dark lava plain on the Moon. It has no storms: the Moon has no air.',
+    ],
+    talk: 'The Moon has no air. What does a storm need that the Moon does not have?',
+    look: { regolith: '#8a8379', fresh: '#a7a197', craterDensity: 0.85, craterScale: 0.85 },
   },
   {
     slug: 'fra-mauro',
@@ -73,8 +105,14 @@ export const SITES: readonly SiteInfo[] = [
     offset: { min: 120, max: 260 },
     drift: { min: 2, max: 4 },
     descent: { min: 8, max: 11 },
-    fuel: 740,
-    fact: 'A crew landed in these hills in February 1971. One explorer hit two golf balls here, in gravity one sixth of the Earth.',
+    fuel: 300,
+    facts: [
+      'A crew landed in these hills in February 1971. One explorer hit two golf balls here, in gravity one sixth of the Earth.',
+      'The crew pulled a small cart with two wheels to carry their tools and rocks up the hills.',
+      'Scientists think these hills are rock that was thrown out when a giant space rock hit the Moon far away.',
+    ],
+    talk: 'A golf ball flies much farther on the Moon. Why do you think that is?',
+    look: { regolith: '#999389', fresh: '#b6b0a6', craterDensity: 1.3, craterScale: 1.1 },
   },
   {
     slug: 'descartes',
@@ -86,8 +124,13 @@ export const SITES: readonly SiteInfo[] = [
     offset: { min: 160, max: 320 },
     drift: { min: 2.5, max: 5 },
     descent: { min: 8, max: 12 },
-    fuel: 660,
-    fact: 'In April 1972 a crew landed in these bright highlands, far from the dark lava plains. The rocks here are very old.',
+    fuel: 270,
+    facts: [
+      'In April 1972 a crew landed in these bright highlands, far from the dark lava plains. The rocks here are very old.',
+      'The crew drove a car on the Moon here. Its fastest run was about 18 km/h, a little faster than a child can run.',
+    ],
+    talk: 'Why do you think scientists want to study very old rocks?',
+    look: { regolith: '#a09a91', fresh: '#bcb6ac', craterDensity: 1.4, craterScale: 1.15 },
   },
   {
     slug: 'taurus-littrow',
@@ -99,8 +142,14 @@ export const SITES: readonly SiteInfo[] = [
     offset: { min: 200, max: 380 },
     drift: { min: 3, max: 6 },
     descent: { min: 9, max: 12 },
-    fuel: 580,
-    fact: 'The last people on the Moon left this deep valley in December 1972. They found orange soil made of tiny glass beads.',
+    fuel: 265,
+    facts: [
+      'The last people on the Moon left this deep valley in December 1972. They found orange soil made of tiny glass beads.',
+      'On the way here, the crew took a famous photo of the whole Earth, fully lit by the Sun.',
+      'Mountains about 2 km high stand on both sides of this valley.',
+    ],
+    talk: 'Why is landing in a deep valley harder than landing on a flat plain?',
+    look: { regolith: '#7c756c', fresh: '#b8b2a7', craterDensity: 1, craterScale: 1 },
   },
   {
     slug: 'hadley',
@@ -112,8 +161,14 @@ export const SITES: readonly SiteInfo[] = [
     offset: { min: 250, max: 450 },
     drift: { min: 4, max: 7 },
     descent: { min: 9, max: 13 },
-    fuel: 500,
-    fact: 'In July 1971 the first car on the Moon drove here, beside Hadley Rille: a winding channel about 1.5 km wide.',
+    fuel: 275,
+    facts: [
+      'In July 1971 people drove a car on the Moon for the first time, here beside Hadley Rille: a winding channel about 1 to 1.5 km wide.',
+      'Here a crew member dropped a hammer and a feather at the same time. With no air to slow the feather, both hit the ground together.',
+      'The crew found a white rock here that is about 4 billion years old.',
+    ],
+    talk: 'A hammer and a feather fell together here. Why does a feather fall slowly on the Earth?',
+    look: { regolith: '#8a8379', fresh: '#b4aea3', craterDensity: 1, craterScale: 1.05 },
   },
 ];
 
@@ -154,3 +209,25 @@ export function startConditions(site: SiteInfo, rng: Rng, terrain: Terrain): Sta
 /** Earth's gravity is about six times the Moon's: the debrief compares them. */
 export const GRAVITY_FACT =
   'The Moon pulls with 1.62 m/s², about one sixth of the Earth (9.81 m/s²). A small push from the engine is enough to hover.';
+
+/** The terrain is real LOLA laser altimeter data at true scale. */
+export const REAL_GROUND_FACT = 'This ground is real. A laser on a spacecraft measured every hill.';
+
+/** Design limit of the real landing legs for speed down (about 10 ft/s). */
+export const REAL_LEG_LIMIT_VS = 3;
+
+/** The fact for a run: the site facts take turns. */
+export function factFor(site: SiteInfo, run: number): string {
+  const n = site.facts.length;
+  if (n === 0) return '';
+  return site.facts[((Math.floor(run) % n) + n) % n] ?? '';
+}
+
+/** "You vs the real crew" line for the debrief (speed down at touchdown, m/s). */
+export function crewLine(site: SiteInfo, vs: number): string {
+  const you = `You: ${vs.toFixed(1)} m/s.`;
+  if (site.crewVs !== undefined) {
+    return `The real crew touched down here at about ${site.crewVs.toFixed(1)} m/s. ${you}`;
+  }
+  return `The real landing legs were built for up to about ${REAL_LEG_LIMIT_VS} m/s down. ${you}`;
+}

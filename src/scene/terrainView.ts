@@ -5,13 +5,18 @@
  *   vertices a side). Lower tiers are resampled from the full grid.
  * - Near patch: about 1.9 km around the lander at full data resolution (each 60 m cell split in
  *   two), so the ground under the footpads matches the sim at every tier. The far mesh skips
- *   (discards) the pixels under the patch, and a skirt hides the seam.
+ *   (discards) the pixels under the patch, 1 m inside its edge, and a two-sided skirt hides the
+ *   seam from inside and outside the patch.
  *
- * Colour: warm grey regolith, brighter on steep slopes, with baked long sun shadows (bluish) and
- * a decorative crater detail map. Detail is decoration, not data.
+ * Colour: regolith tinted per site (maria darker and warmer, highlands lighter), brighter on
+ * steep slopes, a broad two-octave brightness variation (about +-12%), baked long sun shadows
+ * (bluish) and a decorative crater detail map. The shader samples the detail at two scales (150 m
+ * and about 520 m, rotated 37 degrees) so the repeat does not show, and fades the detail normals
+ * far away. Detail is decoration, not data.
  */
 import * as THREE from 'three';
 import type { Rng } from '../kit/prng';
+import type { SiteLook } from '../sim/sites';
 import type { Terrain } from '../sim/terrain';
 import { sampleBaked } from './shade';
 import { makeValueNoise, type RegolithDetail } from './textures';
@@ -24,12 +29,54 @@ const PATCH_SUB = 2;
 /** Recentre the patch when the lander is this many cells from its centre. */
 const PATCH_SLACK = 5;
 const SKIRT = 30;
+/** The far mesh is discarded this far (m) inside the patch edge, so it tucks under the patch. */
+const PATCH_INSET = 1;
 
-/** Regolith colours (hex is sRGB; three stores them linear): warm grey and fresh steep slopes. */
-const REGOLITH = new THREE.Color('#a39b90');
-const FRESH = new THREE.Color('#c4bdb2');
+/** Default regolith colours (hex is sRGB; three stores them linear): warm grey, fresh slopes. */
+export const DEFAULT_LOOK: SiteLook = {
+  regolith: '#8e877d',
+  fresh: '#aaa49b',
+  craterDensity: 1,
+  craterScale: 1,
+};
 /** Linear multiplier inside baked shadows: dim and a little blue (earthshine and sky fill). */
 const SHADOW_TINT = { r: 0.3, g: 0.34, b: 0.46 } as const;
+
+/**
+ * Detail sampling at two scales, mixed 60/40: the 150 m tile and a rotated, larger copy (0.29 x
+ * the frequency, about 520 m). The second normal sample is rotated back into the first frame.
+ * Detail normals fade to 30% between 250 m and 600 m from the camera.
+ */
+const DETAIL_GLSL = /* glsl */ `
+const mat2 mtRot = mat2(0.79864, 0.60182, -0.60182, 0.79864);
+const mat2 mtRotInv = mat2(0.79864, -0.60182, 0.60182, 0.79864);
+vec2 mtUv2(vec2 uv) { return mtRot * uv * 0.29; }
+`;
+
+const MAP_GLSL = /* glsl */ `
+#ifdef USE_MAP
+  vec4 sampledDiffuseColor = mix( texture2D( map, vMapUv ), texture2D( map, mtUv2( vMapUv ) ), 0.4 );
+  diffuseColor *= sampledDiffuseColor;
+#endif
+`;
+
+const NORMAL_GLSL = /* glsl */ `
+#if defined( USE_NORMALMAP_TANGENTSPACE )
+  vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;
+  vec3 mapN2 = texture2D( normalMap, mtUv2( vNormalMapUv ) ).xyz * 2.0 - 1.0;
+  mapN.xy = mix( mapN.xy, mtRotInv * mapN2.xy, 0.4 );
+  mapN.xy *= normalScale * mix( 1.0, 0.3, smoothstep( 250.0, 600.0, length( vViewPosition ) ) );
+  normal = normalize( tbn * mapN );
+#endif
+`;
+
+/** Add the two-scale detail to a standard material's fragment shader. */
+function addDetail(shader: { fragmentShader: string }): void {
+  shader.fragmentShader = shader.fragmentShader
+    .replace('void main() {', `${DETAIL_GLSL}\nvoid main() {`)
+    .replace('#include <map_fragment>', MAP_GLSL)
+    .replace('#include <normal_fragment_maps>', NORMAL_GLSL);
+}
 
 export type Lod = 256 | 128 | 64;
 
@@ -39,6 +86,8 @@ export interface TerrainSource {
   lit: Float32Array;
   /** Seed for colour variation. */
   seed: number;
+  /** Site colours and crater detail (decoration). */
+  look: SiteLook;
 }
 
 interface GridSpec {
@@ -64,9 +113,13 @@ export class TerrainView {
   private patchI = -1;
   private patchJ = -1;
   private readonly tmp = new THREE.Color();
+  private readonly regolith = new THREE.Color(DEFAULT_LOOK.regolith);
+  private readonly fresh = new THREE.Color(DEFAULT_LOOK.fresh);
+  private detail: RegolithDetail;
 
   constructor(detail: RegolithDetail, lod: Lod) {
     this.lod = lod;
+    this.detail = detail;
     this.group.name = 'terrain';
     const base = {
       vertexColors: true,
@@ -75,12 +128,15 @@ export class TerrainView {
       envMapIntensity: 0,
       map: detail.albedo,
       normalMap: detail.normal,
-      normalScale: new THREE.Vector2(0.55, 0.55),
+      normalScale: new THREE.Vector2(0.6, 0.6),
     };
     this.nearMaterial = new THREE.MeshStandardMaterial(base);
     this.farMaterial = new THREE.MeshStandardMaterial(base);
+    this.nearMaterial.onBeforeCompile = (shader) => addDetail(shader);
+    this.nearMaterial.customProgramCacheKey = () => 'moon-terrain-near';
     const rect = this.patchRect;
     this.farMaterial.onBeforeCompile = (shader) => {
+      addDetail(shader);
       shader.uniforms['uPatch'] = rect;
       shader.vertexShader =
         'varying vec2 vWorldXZ;\n' +
@@ -102,14 +158,30 @@ export class TerrainView {
     return this.src?.terrain ?? null;
   }
 
+  /** Swap the detail maps (a new site look). The caller owns the old maps. */
+  setDetail(detail: RegolithDetail): void {
+    this.detail = detail;
+    for (const m of [this.nearMaterial, this.farMaterial]) {
+      m.map = detail.albedo;
+      m.normalMap = detail.normal;
+    }
+  }
+
+  get detailMaps(): RegolithDetail {
+    return this.detail;
+  }
+
   setSource(src: TerrainSource, rng: Rng): void {
     this.src = src;
+    this.regolith.set(src.look.regolith);
+    this.fresh.set(src.look.fresh);
     const noise = makeValueNoise(rng, 64);
-    // Broad, gentle brightness variation (about +-7%) so the far field does not look flat.
+    // Broad brightness variation in three octaves (about +-12%), so the far field does not look
+    // flat or tiled.
     this.tint = (x, z) => {
       const u = x / 900 + 32;
       const v = z / 900 + 32;
-      return 0.93 + 0.1 * noise(u, v) + 0.04 * noise(u * 3.1, v * 3.1);
+      return 0.88 + 0.15 * noise(u, v) + 0.06 * noise(u * 3.1, v * 3.1) + 0.03 * noise(u * 9.7 + 5, v * 9.7 + 5);
     };
     this.patchI = -1;
     this.patchJ = -1;
@@ -150,7 +222,7 @@ export class TerrainView {
     }
     const x1 = x0 + (n - 1) * step;
     const z1 = z0 + (n - 1) * step;
-    this.patchRect.value.set(x0, z0, x1, z1);
+    this.patchRect.value.set(x0 + PATCH_INSET, z0 + PATCH_INSET, x1 - PATCH_INSET, z1 - PATCH_INSET);
   }
 
   private buildFar(): void {
@@ -177,7 +249,7 @@ export class TerrainView {
     const t = src.terrain;
     const slope = t.slopeAt(x, z, 30);
     const fresh = Math.min(1, Math.max(0, (slope - 0.12) / 0.35));
-    out.copy(REGOLITH).lerp(FRESH, fresh);
+    out.copy(this.regolith).lerp(this.fresh, fresh);
     out.multiplyScalar(this.tint ? this.tint(x, z) : 1);
     const lit = sampleBaked(src.lit, t.size, t.indexOf(x), t.indexOf(z));
     const r = SHADOW_TINT.r + (1 - SHADOW_TINT.r) * lit;
@@ -250,7 +322,9 @@ export class TerrainView {
         const b = ring[(k + 1) % ring.length] as number;
         const sa = main + k;
         const sb = main + ((k + 1) % ring.length);
+        // Both windings: the camera sees the skirt from outside and from inside the patch.
         indices.push(a, b, sa, b, sb, sa);
+        indices.push(a, sa, b, b, sa, sb);
       }
     }
     const geo = new THREE.BufferGeometry();

@@ -61,8 +61,16 @@
         </div>
       </div>
 
+      <!-- Edge arrows: point to the ring and the predicted touchdown when they are out of the frame. -->
+      <div class="mt-edge mt-edge-ring" id="edge-ring" aria-hidden="true" hidden>
+        <span class="mt-edge-arrow" data-icon="drift"></span><span class="mt-edge-dist" id="edge-ring-dist"></span>
+      </div>
+      <div class="mt-edge mt-edge-marker" id="edge-marker" aria-hidden="true" hidden>
+        <span class="mt-edge-arrow" data-icon="drift"></span>
+      </div>
+
       <div class="mt-callout" id="callout" role="status" hidden></div>
-      <div class="mt-badge" id="assist-badge" hidden><span class="mt-badge-icon" data-icon="assist"></span><span>Helper</span></div>
+      <div class="mt-badge" id="assist-badge" hidden><span class="mt-badge-icon" data-icon="assist"></span><span>Help</span></div>
 
       <!-- Touch controls: throttle slider (left thumb) and tilt pad (right thumb). -->
       <div class="mt-throttle" id="throttle" role="slider" aria-label="Throttle" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-orientation="vertical" hidden>
@@ -74,13 +82,16 @@
       </div>
       <button type="button" class="mt-assist-btn" id="assist-btn" aria-pressed="false" aria-label="Hover helper" hidden>
         <span class="mt-assist-icon" data-icon="assist"></span>
+        <span class="mt-assist-label" aria-hidden="true">Help</span>
       </button>
 
       <div class="mt-ready" id="ready" hidden>
         <button type="button" class="mt-go" id="go-btn" aria-label="Go">
           <span class="mt-go-icon" data-icon="play"></span>
         </button>
-        <p class="mt-ready-tip"><span data-icon="down"></span> under 2 m/s <span data-icon="target"></span> in the ring</p>
+        <!-- First flights: Go starts with the helper on. The slider takes over the engine. -->
+        <p class="mt-ready-tip" id="ready-tip-help"><span data-icon="assist"></span> Help is on <span data-icon="controls"></span> slide to take over</p>
+        <p class="mt-ready-tip" id="ready-tip-solo" hidden><span data-icon="down"></span> under 2 m/s <span data-icon="target"></span> in the ring</p>
       </div>
 
       <div class="g499-overlay mt-picker" id="picker" hidden>
@@ -98,9 +109,9 @@
         <div class="g499-card mt-help-card">
           <h2><span class="mt-title-icon" data-icon="lander"></span> How to fly</h2>
           <ul class="mt-help-list">
-            <li><span class="mt-help-icon" data-icon="controls"></span><span><b>Engine</b> left slider · W/S or ↑/↓ · left stick</span></li>
-            <li><span class="mt-help-icon" data-icon="tilt"></span><span><b>Tilt</b> right pad · A/D or ←/→ side · E/Q away/toward · or I J K L · right stick</span></li>
-            <li><span class="mt-help-icon" data-icon="assist"></span><span><b>Helper</b> big button · Space · A button. It flies down gently for you.</span></li>
+            <li><span class="mt-help-icon" data-icon="controls"></span><span><b>Engine</b> left slider (drag up or down) · W/S · left stick</span></li>
+            <li><span class="mt-help-icon" data-icon="tilt"></span><span><b>Tilt</b> right pad · arrow keys or I J K L · right stick</span></li>
+            <li><span class="mt-help-icon" data-icon="assist"></span><span><b>Help</b> big button · Space · A button. It flies the engine for you. You steer to the ring.</span></li>
             <li><span class="mt-help-icon" data-icon="down"></span><span><b>Touch down</b> under 2 m/s down, under 1.2 m/s sideways, standing level.</span></li>
             <li><span class="mt-help-icon" data-icon="fuel"></span><span><b>Fuel</b> counts in seconds of hovering. Chimes at 60 s and 30 s.</span></li>
             <li><span class="mt-help-icon" data-icon="earth"></span><span>The Moon pulls 1.62 m/s², one sixth of the Earth, so a small push holds you up.</span></li>
@@ -141,9 +152,15 @@
             <figcaption><i class="mt-key-height"></i> height <i class="mt-key-speed"></i> speed down</figcaption>
           </figure>
           <div class="mt-fact">
-            <span class="mt-fact-icon" data-icon="earth"></span>
-            <div><p id="fact-site"></p><p id="fact-gravity"></p></div>
+            <span class="mt-fact-map" id="fact-map"></span>
+            <div>
+              <p id="fact-site"></p>
+              <p class="mt-fact-real" id="fact-real"></p>
+              <p id="fact-crew"></p>
+              <p id="fact-gravity"></p>
+            </div>
           </div>
+          <p class="mt-talk" id="fact-talk"><span class="mt-talk-icon" data-icon="help"></span><span><b>Talk about it:</b> <span id="fact-talk-text"></span></span></p>
           <div class="mt-debrief-actions">
             <button type="button" class="g499-button" id="retry" aria-label="Try again"><span class="mt-btn-icon" data-icon="again"></span><span>Again</span></button>
             <button type="button" class="g499-button is-secondary" id="next-site" aria-label="Next site"><span class="mt-btn-icon" data-icon="next"></span><span>Next</span></button>

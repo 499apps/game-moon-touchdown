@@ -8,33 +8,41 @@ import { noteToFreq, type Synth } from './kit/audio';
 
 /** Seconds between engine hum pulses (overlapping pulses blend into a steady hum). */
 const HUM_STEP = 0.09;
+/** Seconds between soft noise hisses at full throttle (slower at low throttle). */
+const HISS_STEP = 1.6;
 
 export class MoonSounds {
   private readonly synth: Synth;
   private humClock = 0;
+  private hissClock = 0;
 
   constructor(synth: Synth) {
     this.synth = synth;
   }
 
-  /** Call every frame with the applied throttle (0 = engine off). */
+  /**
+   * Call every frame with the applied throttle (0 = engine off). A low hum (52-78 Hz), a quieter
+   * layer at three times the pitch (156-234 Hz) that phone speakers can play, and a soft hiss.
+   */
   engine(throttle: number, dt: number): void {
     if (throttle <= 0) {
       this.humClock = 0;
+      this.hissClock = 0;
       return;
+    }
+    const k = Math.min(1, throttle);
+    this.hissClock -= dt;
+    if (this.hissClock <= 0 && k >= 0.3) {
+      this.hissClock = HISS_STEP / k;
+      this.synth.whoosh();
     }
     this.humClock -= dt;
     if (this.humClock > 0) return;
     this.humClock = HUM_STEP;
-    const k = Math.min(1, throttle);
-    this.synth.tone({
-      freq: 52 + 26 * k,
-      duration: 0.16,
-      type: 'triangle',
-      volume: 0.025 + 0.05 * k,
-      attack: 0.04,
-      release: 0.08,
-    });
+    const freq = 52 + 26 * k;
+    const volume = 0.025 + 0.05 * k;
+    this.synth.tone({ freq, duration: 0.16, type: 'triangle', volume, attack: 0.04, release: 0.08 });
+    this.synth.tone({ freq: freq * 3, duration: 0.16, type: 'triangle', volume: volume * 0.4, attack: 0.04, release: 0.08 });
   }
 
   start(): void {

@@ -1,14 +1,16 @@
 /**
  * Debrief chart on a 2D canvas: height and downward speed against time. Line styles differ
- * (solid / dashed) as well as colours, and the safe touchdown speed (under 2 m/s) is a green
- * band on the speed axis.
+ * (solid / dashed) as well as colours. A soft green band shows the safe speed for the height at
+ * each moment (the same envelope as the HUD), and a brighter band the touchdown limit (2 m/s).
  */
+import { vsLimits } from './hud';
 import { LIMITS } from './sim/constants';
 import type { TraceSample } from './sim/flight';
 
 const HEIGHT = '#63e6be';
 const SPEED = '#ffe66d';
 const SAFE = 'rgba(140, 233, 154, 0.16)';
+const ENVELOPE = 'rgba(140, 233, 154, 0.1)';
 const GRID = 'rgba(200, 210, 240, 0.16)';
 const TEXT = 'rgba(255, 247, 230, 0.8)';
 
@@ -53,6 +55,14 @@ export function drawDescentChart(canvas: HTMLCanvasElement, trace: readonly Trac
     ctx.lineTo(pad.l + w, y);
     ctx.stroke();
   }
+  // Safe speed for the height at each moment: fast is fine high up, slow near the ground.
+  ctx.fillStyle = ENVELOPE;
+  ctx.beginPath();
+  ctx.moveTo(xOf(t0), yV(0));
+  for (const s of trace) ctx.lineTo(xOf(s.t), yV(vsLimits(s.height).green));
+  ctx.lineTo(xOf(t1), yV(0));
+  ctx.closePath();
+  ctx.fill();
   // Safe touchdown speeds.
   ctx.fillStyle = SAFE;
   ctx.fillRect(pad.l, yV(LIMITS.vs), w, yV(0) - yV(LIMITS.vs));

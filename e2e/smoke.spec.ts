@@ -1,6 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { guardPage, hasWebgl, readState, stepFrames, waitForReady } from '../src/kit/smoke/helpers';
 import { defineSmokeSuite } from '../src/kit/smoke/suite';
+import { palette } from '../src/kit/theme';
+
+/** '#rrggbb' to the computed-style form 'rgb(r, g, b)'. */
+function cssRgb(hex: string): string {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+}
 
 defineSmokeSuite([
   {
@@ -29,6 +36,10 @@ interface MoonTestState {
   tick: number;
   paused: boolean;
   assist: boolean;
+  helped: boolean;
+  solo: boolean;
+  ringOnScreen: boolean;
+  markerOnScreen: boolean;
   debrief: boolean;
   unlocked: number;
   stepFrames: number;
@@ -91,6 +102,24 @@ test.describe('moon-touchdown round', () => {
     await expect(page.locator('#debrief')).toBeVisible();
     await expect(page.locator('#outcome-title')).toContainText('touchdown');
     await expect(page.locator('#next-site')).toBeEnabled();
+
+    // What the player sees: the card and the earned stars are fully opaque (test mode freezes
+    // animations, so this checks the end state is shown), and an earned star is lemon yellow.
+    const look = await page.evaluate(() => {
+      const opacity = (sel: string) => {
+        const el = document.querySelector(sel);
+        return el ? getComputedStyle(el).opacity : null;
+      };
+      const svg = document.querySelector('.mt-star.is-on svg');
+      return {
+        card: opacity('#debrief .mt-debrief-card'),
+        star: opacity('.mt-star.is-on'),
+        starColor: svg ? getComputedStyle(svg).color : null,
+      };
+    });
+    expect(look.card, 'debrief card opacity').toBe('1');
+    expect(look.star, 'earned star opacity').toBe('1');
+    expect(look.starColor, 'earned star colour').toBe(cssRgb(palette.lemon));
     expect(
       await page.evaluate(() => localStorage.getItem('g499:moon-touchdown:progress')),
       'progress saved under the g499 prefix',

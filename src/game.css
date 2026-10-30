@@ -77,11 +77,25 @@
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * Icon colours live on the span only. The SVG inherits them, so the state rules on the span
+ * (earned star, gauge band, bumpy outcome) reach the drawing.
+ */
+.mt-star svg,
+.mt-site-star svg,
+.mt-gauge-icon svg,
+.mt-outcome-icon svg {
+  color: inherit;
+}
+
 .mt-gauge-icon,
 .mt-gauge-icon svg {
   display: inline-flex;
   width: 24px;
   height: 24px;
+}
+
+.mt-gauge-icon {
   color: var(--g499-sky);
 }
 
@@ -119,16 +133,20 @@
   color: var(--mt-bad);
 }
 
-/* Speed down: green 0-2, yellow 2-4, red 4-8 m/s. */
+/*
+ * Speed down. Green reaches the safe speed for the height (src/hud.ts sets --mt-vs-green), yellow
+ * ends at the middle, red is the right half. Near the ground: green 0-2, yellow 2-4, red 4-8 m/s.
+ */
 .mt-vs-bar {
+  --mt-vs-green: 25%;
   position: relative;
   width: 92px;
   height: 12px;
   border-radius: 6px;
   background: linear-gradient(
     90deg,
-    var(--g499-lime) 0 25%,
-    var(--g499-lemon) 25% 50%,
+    var(--g499-lime) 0 var(--mt-vs-green),
+    var(--g499-lemon) var(--mt-vs-green) 50%,
     var(--g499-coral) 50% 100%
   );
   opacity: 0.9;
@@ -148,6 +166,11 @@
 
 .mt-gauge[data-band='bad'] .mt-vs-mark {
   animation: mt-blink 0.6s steps(2, end) infinite;
+}
+
+/* No blink while the helper flies the engine: it is in control. */
+.mt-hud[data-assist='on'] .mt-gauge[data-band='bad'] .mt-vs-mark {
+  animation: none;
 }
 
 .mt-drift-dial,
@@ -290,11 +313,102 @@
   gap: 6px;
   padding: 6px 12px;
   border-radius: 999px;
-  background: rgba(99, 230, 190, 0.18);
+  /* Solid dark backing: readable on bright ground. */
+  background: rgba(10, 12, 32, 0.78);
+  box-shadow: inset 0 0 0 2px var(--g499-mint);
   color: var(--g499-mint);
   font-weight: 800;
   pointer-events: none;
   z-index: 21;
+}
+
+/* ---------- Edge arrows (ring and predicted touchdown out of the frame) ---------- */
+
+.mt-edge {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 19;
+}
+
+.mt-edge[hidden] {
+  display: none;
+}
+
+.mt-edge-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(10, 12, 32, 0.72);
+  box-shadow: inset 0 0 0 3px currentColor;
+}
+
+.mt-edge-arrow svg {
+  width: 28px;
+  height: 28px;
+  color: inherit;
+}
+
+.mt-edge-ring {
+  color: var(--g499-mint);
+}
+
+.mt-edge-marker {
+  color: var(--g499-lime);
+}
+
+.mt-edge-marker .mt-edge-arrow {
+  width: 34px;
+  height: 34px;
+}
+
+.mt-edge-marker .mt-edge-arrow svg {
+  width: 20px;
+  height: 20px;
+}
+
+.mt-edge-marker[data-band='warn'] {
+  color: var(--g499-lemon);
+}
+
+.mt-edge-marker[data-band='bad'] {
+  color: var(--g499-coral);
+}
+
+.mt-edge-dist {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(10, 12, 32, 0.72);
+  font-size: 14px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* One-time attention pulse: the Help button on the first ready screen, the ring arrow and the
+   tilt pad at 200 m in a helper flight. The first keyframe is the resting state. */
+.mt-edge.is-pulse .mt-edge-arrow,
+.mt-pad.is-pulse,
+.mt-assist-btn.is-pulse {
+  animation: mt-attention 0.9s ease-in-out 3;
+}
+
+@keyframes mt-attention {
+  0%,
+  100% {
+    filter: none;
+  }
+  50% {
+    filter: brightness(1.35) drop-shadow(0 0 10px rgba(99, 230, 190, 0.9));
+  }
 }
 
 .mt-badge[hidden] {
@@ -467,11 +581,24 @@
   outline-offset: 3px;
 }
 
+.mt-assist-btn {
+  flex-direction: column;
+  gap: 0;
+}
+
 .mt-assist-icon,
 .mt-assist-icon svg {
   display: inline-flex;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
+}
+
+/* A short visible label: "Help". */
+.mt-assist-label {
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.02em;
 }
 
 /* ---------- Ready ---------- */
@@ -535,6 +662,10 @@
   background: rgba(10, 12, 32, 0.7);
   font-weight: 700;
   white-space: nowrap;
+}
+
+.mt-ready-tip[hidden] {
+  display: none;
 }
 
 .mt-ready-tip span,
@@ -714,11 +845,43 @@
   display: inline-flex;
   width: 20px;
   height: 20px;
+}
+
+.mt-site-star {
   color: rgba(255, 255, 255, 0.25);
 }
 
 .mt-site-star.is-on {
   color: var(--g499-lemon);
+}
+
+/* The helper flew this best run: a small mint helper mark after the stars. */
+.mt-site-helped,
+.mt-site-helped svg {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+}
+
+.mt-site-helped {
+  margin-left: 3px;
+  color: var(--g499-mint);
+  opacity: 0.9;
+}
+
+/* Where on the Moon: a small map in the corner of each site card. */
+.mt-site-map {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+}
+
+.mt-site-map-svg {
+  width: 100%;
+  height: 100%;
 }
 
 .mt-help-list {
@@ -776,6 +939,9 @@
   display: inline-flex;
   width: 40px;
   height: 40px;
+}
+
+.mt-outcome-icon {
   color: var(--g499-lemon);
 }
 
@@ -793,6 +959,9 @@
   display: inline-flex;
   width: 42px;
   height: 42px;
+}
+
+.mt-star {
   color: rgba(255, 255, 255, 0.2);
 }
 
@@ -887,12 +1056,63 @@
   margin: 0 0 4px;
 }
 
-.mt-fact-icon,
-.mt-fact-icon svg {
+.mt-fact-map {
   display: inline-flex;
   flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
+  width: 56px;
+  height: 56px;
+}
+
+.mt-fact-map-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.mt-fact-real {
+  color: var(--g499-mint);
+  font-weight: 700;
+}
+
+.mt-fact p[hidden] {
+  display: none;
+}
+
+/* A question for the parent and the child to talk about. */
+.mt-talk {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: rgba(177, 151, 252, 0.14);
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.mt-talk-icon,
+.mt-talk-icon svg {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+}
+
+.mt-talk-icon {
+  color: var(--g499-lavender);
+}
+
+.mt-reason-icon,
+.mt-reason-icon svg {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  vertical-align: -6px;
+}
+
+.mt-reason-icon {
+  margin-right: 6px;
   color: var(--g499-sky);
 }
 
@@ -992,9 +1212,69 @@
     transform: translateX(-50%) scale(0.94);
   }
 
+  /* The ready tip sits above the top of the throttle slider. */
   .mt-ready {
-    bottom: calc(34% + var(--g499-safe-bottom));
+    bottom: calc(min(44vh, 280px) + 40px + var(--g499-safe-bottom));
   }
+}
+
+/* Phones: the cards start below the drawer button at the top left. */
+@media (max-width: 719px) {
+  .g499-overlay.mt-picker,
+  .g499-overlay.mt-help,
+  .g499-overlay.mt-debrief {
+    padding-top: calc(var(--g499-touch) + 16px + var(--g499-safe-top));
+  }
+
+  .mt-picker-card,
+  .mt-help-card,
+  .mt-debrief-card {
+    max-height: calc(100dvh - var(--g499-touch) - 32px - var(--g499-safe-top) - var(--g499-safe-bottom));
+  }
+}
+
+/* Short screens: smaller site cards, so "How to fly" shows without scrolling. */
+@media (max-height: 760px) {
+  .mt-site {
+    min-height: 120px;
+    padding-top: 10px;
+  }
+
+  .mt-site-emblem {
+    width: 52px;
+    height: 52px;
+  }
+
+  .mt-site-svg {
+    width: 30px;
+    height: 30px;
+  }
+
+  .mt-site-map {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* Rail title: "Moon Touchdown" on two whole lines (the kit clamps at two lines). */
+@media (min-width: 720px) {
+  .g499-rail-title {
+    font-size: 9px;
+    letter-spacing: 0;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+}
+
+/*
+ * Test mode (?test=1) pauses every animation at its first keyframe. These animations start at
+ * opacity 0, so the end state is shown instead. (Interim until the kit test-mode rule uses
+ * "animation: none".)
+ */
+html.g499-test .mt-debrief-card,
+html.g499-test .mt-star.is-on,
+html.g499-test .mt-callout {
+  animation: none;
 }
 
 @keyframes mt-breathe {
@@ -1044,7 +1324,10 @@
   .mt-gauge[data-band='bad'] .mt-vs-mark,
   .mt-callout,
   .mt-star.is-on,
-  .mt-debrief-card {
+  .mt-debrief-card,
+  .mt-edge.is-pulse .mt-edge-arrow,
+  .mt-pad.is-pulse,
+  .mt-assist-btn.is-pulse {
     animation: none;
   }
 
