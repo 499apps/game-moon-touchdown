@@ -1,0 +1,86 @@
+{
+ "source": "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/",
+ "product": "LRO LOLA LDEM_512 (gridded elevation, 512 px/deg)",
+ "licence": "Public domain (NASA)",
+ "sites": [
+  {
+   "slug": "tranquility",
+   "name": "Sea of Tranquility",
+   "lat": 0.6741,
+   "lon": 23.473,
+   "tile": "ldem_512_00n_45n_000_090.img",
+   "size": 256,
+   "spacing": 60.0,
+   "unit": 0.5,
+   "min": -121.22922506770647,
+   "max": 156.9624198558297,
+   "std": 59.95016591208127
+  },
+  {
+   "slug": "storms",
+   "name": "Ocean of Storms",
+   "lat": -3.0124,
+   "lon": 336.5784,
+   "tile": "ldem_512_45s_00s_270_360.img",
+   "size": 256,
+   "spacing": 60.0,
+   "unit": 0.5,
+   "min": -75.92665931491074,
+   "max": 66.68619358370732,
+   "std": 33.54158242481067
+  },
+  {
+   "slug": "fra-mauro",
+   "name": "Fra Mauro Highlands",
+   "lat": -3.6453,
+   "lon": 342.5286,
+   "tile": "ldem_512_45s_00s_270_360.img",
+   "size": 256,
+   "spacing": 60.0,
+   "unit": 0.5,
+   "min": -152.9895280043322,
+   "max": 244.78586765220837,
+   "std": 55.54082470681756
+  },
+  {
+   "slug": "descartes",
+   "name": "Descartes Highlands",
+   "lat": -8.973,
+   "lon": 15.5002,
+   "tile": "ldem_512_45s_00s_000_090.img",
+   "size": 256,
+   "spacing": 60.0,
+   "unit": 0.5,
+   "min": -143.92251139293617,
+   "max": 569.7525065287865,
+   "std": 156.78251900412965
+  },
+  {
+   "slug": "taurus-littrow",
+   "name": "Taurus-Littrow Valley",
+   "lat": 20.1911,
+   "lon": 30.7723,
+   "tile": "ldem_512_00n_45n_000_090.img",
+   "size": 256,
+   "spacing": 60.0,
+   "unit": 0.5,
+   "min": -281.73508730056994,
+   "max": 2132.707724873435,
+   "std": 494.1334777764209
+  },
+  {
+   "slug": "hadley",
+   "name": "Hadley Rille",
+   "lat": 26.1322,
+   "lon": 3.6339,
+   "tile": "ldem_512_00n_45n_000_090.img",
+   "size": 256,
+   "spacing": 60.0,
+   "unit": 0.5,
+   "min": -279.4403359527481,
+   "max": 1286.618441241029,
+   "std": 203.67571983333576
+  }
+ ],
+ "processing": "Bilinear resample to a 256x256 local grid at 60 m spacing centred on each site, 1D Gaussian (sigma 1.6 px) across columns to soften LOLA track striping, heights relative to the site centre in 0.5 m units (int16 little-endian)."
+}

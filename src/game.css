@@ -1,0 +1,1049 @@
+/*
+ * Moon Touchdown page layout. Menus stay in the kit's left rail. Flight readouts sit at the top
+ * (right of the rail), the throttle slider bottom-left (right of the rail, inside the safe area),
+ * the tilt pad bottom-right, the hover helper button between them. All controls are >= 56px.
+ */
+
+.game-stage {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: var(--g499-rail-inset);
+}
+
+.game-pause-icon {
+  display: inline-flex;
+  width: 72px;
+  height: 72px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--g499-lime);
+  color: var(--g499-ink);
+}
+
+.game-pause-icon svg {
+  width: 36px;
+  height: 36px;
+}
+
+#pause {
+  cursor: pointer;
+}
+
+#pause .g499-card {
+  cursor: default;
+}
+
+/* ---------- HUD ---------- */
+
+.mt-hud {
+  --mt-good: var(--g499-lime);
+  --mt-warn: var(--g499-lemon);
+  --mt-bad: var(--g499-coral);
+  position: absolute;
+  top: calc(10px + var(--g499-safe-top));
+  left: calc(12px + var(--g499-rail-inset));
+  right: calc(12px + var(--g499-safe-right));
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: stretch;
+  gap: 8px;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.mt-hud[hidden] {
+  display: none;
+}
+
+.mt-gauge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 48px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  background: rgba(10, 12, 32, 0.66);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: var(--g499-cream);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.mt-gauge-icon,
+.mt-gauge-icon svg {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  color: var(--g499-sky);
+}
+
+.mt-big {
+  min-width: 3.2ch;
+  font-size: 30px;
+  line-height: 1;
+  text-align: right;
+  letter-spacing: -0.01em;
+}
+
+.mt-num {
+  min-width: 2.6ch;
+  font-size: 19px;
+  text-align: right;
+}
+
+.mt-unit {
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.mt-gauge[data-band='good'] .mt-num,
+.mt-gauge[data-band='good'] .mt-gauge-icon {
+  color: var(--mt-good);
+}
+
+.mt-gauge[data-band='warn'] .mt-num,
+.mt-gauge[data-band='warn'] .mt-gauge-icon {
+  color: var(--mt-warn);
+}
+
+.mt-gauge[data-band='bad'] .mt-num,
+.mt-gauge[data-band='bad'] .mt-gauge-icon {
+  color: var(--mt-bad);
+}
+
+/* Speed down: green 0-2, yellow 2-4, red 4-8 m/s. */
+.mt-vs-bar {
+  position: relative;
+  width: 92px;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--g499-lime) 0 25%,
+    var(--g499-lemon) 25% 50%,
+    var(--g499-coral) 50% 100%
+  );
+  opacity: 0.9;
+}
+
+.mt-vs-mark {
+  position: absolute;
+  top: -5px;
+  left: 0;
+  width: 6px;
+  height: 22px;
+  margin-left: -3px;
+  border-radius: 3px;
+  background: var(--g499-white);
+  box-shadow: 0 0 0 2px rgba(10, 12, 32, 0.9);
+}
+
+.mt-gauge[data-band='bad'] .mt-vs-mark {
+  animation: mt-blink 0.6s steps(2, end) infinite;
+}
+
+.mt-drift-dial,
+.mt-tilt-ball {
+  width: 36px;
+  height: 36px;
+  overflow: visible;
+}
+
+.mt-dial-ring {
+  fill: rgba(255, 255, 255, 0.06);
+  stroke: rgba(255, 247, 230, 0.4);
+  stroke-width: 2;
+}
+
+.mt-dial-safe {
+  fill: none;
+  stroke: var(--g499-lime);
+  stroke-width: 1.6;
+  stroke-dasharray: 2 2;
+}
+
+.mt-arrow-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mt-dial-dot {
+  fill: currentColor;
+}
+
+.mt-drift {
+  color: var(--g499-lime);
+}
+
+.mt-drift[data-band='warn'] {
+  color: var(--g499-lemon);
+}
+
+.mt-drift[data-band='bad'] {
+  color: var(--g499-coral);
+}
+
+.mt-drift .mt-num {
+  color: inherit;
+}
+
+.mt-tilt-dot {
+  fill: var(--g499-lime);
+}
+
+.mt-tilt[data-band='warn'] .mt-tilt-dot {
+  fill: var(--g499-lemon);
+}
+
+.mt-fuel-bar,
+.mt-thr-bar {
+  position: relative;
+  width: 104px;
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: visible;
+}
+
+.mt-fuel-fill,
+.mt-thr-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--g499-mint), var(--g499-sky));
+}
+
+.mt-fuel[data-band='warn'] .mt-fuel-fill {
+  background: linear-gradient(90deg, var(--g499-tangerine), var(--g499-lemon));
+}
+
+.mt-fuel[data-band='bad'] .mt-fuel-fill {
+  background: linear-gradient(90deg, var(--g499-coral), var(--g499-bubblegum));
+}
+
+/* The 60 s mark on the fuel bar. */
+.mt-fuel-mark,
+.mt-thr-hover {
+  position: absolute;
+  top: -4px;
+  width: 3px;
+  height: 20px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--g499-cream);
+  opacity: 0.85;
+}
+
+.mt-thr-fill {
+  background: linear-gradient(90deg, var(--g499-tangerine), var(--g499-lemon));
+}
+
+.mt-thr-hover {
+  background: var(--g499-sky);
+}
+
+/* Call-out banner: "60 seconds of fuel". */
+.mt-callout {
+  position: absolute;
+  top: calc(120px + var(--g499-safe-top));
+  left: calc(var(--g499-rail-inset) + (100% - var(--g499-rail-inset)) / 2);
+  transform: translateX(-50%);
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: rgba(10, 12, 32, 0.8);
+  color: var(--g499-lemon);
+  font-size: 22px;
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: 0 0 0 3px currentColor;
+  pointer-events: none;
+  z-index: 22;
+  animation: mt-pop 380ms cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.mt-callout[data-band='bad'] {
+  color: var(--g499-coral);
+}
+
+.mt-callout[hidden] {
+  display: none;
+}
+
+.mt-badge {
+  position: absolute;
+  top: calc(120px + var(--g499-safe-top));
+  left: calc(14px + var(--g499-rail-inset) + var(--g499-safe-left));
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(99, 230, 190, 0.18);
+  color: var(--g499-mint);
+  font-weight: 800;
+  pointer-events: none;
+  z-index: 21;
+}
+
+.mt-badge[hidden] {
+  display: none;
+}
+
+.mt-badge-icon,
+.mt-badge-icon svg {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+}
+
+/* ---------- Touch controls ---------- */
+
+.mt-throttle {
+  position: absolute;
+  left: calc(18px + var(--g499-rail-inset) + var(--g499-safe-left));
+  bottom: calc(22px + var(--g499-safe-bottom));
+  width: 72px;
+  height: min(44vh, 280px);
+  min-height: 170px;
+  border-radius: 22px;
+  background: rgba(10, 12, 32, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  touch-action: none;
+  z-index: 25;
+}
+
+.mt-throttle[hidden],
+.mt-pad[hidden],
+.mt-assist-btn[hidden] {
+  display: none;
+}
+
+.mt-throttle-track {
+  position: absolute;
+  left: 28px;
+  right: 28px;
+  top: 20px;
+  bottom: 20px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.mt-throttle-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  border-radius: 8px;
+  background: linear-gradient(0deg, var(--g499-tangerine), var(--g499-lemon));
+}
+
+.mt-throttle-hover {
+  position: absolute;
+  left: -12px;
+  right: -12px;
+  height: 3px;
+  margin-bottom: -1.5px;
+  border-radius: 2px;
+  background: var(--g499-sky);
+}
+
+.mt-throttle-knob {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 0;
+  height: 40px;
+  border-radius: 14px;
+  background: radial-gradient(circle at 40% 30%, #fff8dc, var(--g499-lemon) 55%, var(--g499-tangerine));
+  box-shadow:
+    0 4px 10px rgba(0, 0, 0, 0.4),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+}
+
+.mt-throttle.is-active .mt-throttle-knob {
+  transform: scale(1.06);
+}
+
+.mt-pad {
+  position: absolute;
+  right: calc(18px + var(--g499-safe-right));
+  bottom: calc(22px + var(--g499-safe-bottom));
+  width: 168px;
+  height: 168px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.05) 0 30%, transparent 31%),
+    rgba(10, 12, 32, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 2px rgba(255, 255, 255, 0.12);
+  touch-action: none;
+  z-index: 25;
+}
+
+.mt-pad-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 -32px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #e6f4ff, var(--g499-sky) 55%, #4f8fd8);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.mt-pad.is-active {
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 3px var(--g499-sky);
+}
+
+/* Hover helper: a big round button. Left of the tilt pad when the touch pad shows. */
+.mt-assist-btn {
+  position: absolute;
+  right: calc(24px + var(--g499-safe-right));
+  bottom: calc(24px + var(--g499-safe-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #3b4170, #20244a);
+  color: var(--g499-mint);
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 3px rgba(99, 230, 190, 0.5);
+  cursor: pointer;
+  z-index: 26;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mt-touch-on .mt-assist-btn {
+  right: calc(18px + 168px + 16px + var(--g499-safe-right));
+}
+
+.mt-assist-btn.is-on {
+  background: radial-gradient(circle at 35% 30%, #c9fff0, var(--g499-mint) 50%, #2fb08a);
+  color: var(--g499-ink);
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.45),
+    0 0 0 6px rgba(99, 230, 190, 0.3);
+}
+
+.mt-assist-btn:active {
+  transform: scale(0.94);
+}
+
+.mt-assist-btn:focus-visible,
+.mt-go:focus-visible,
+.mt-site:focus-visible,
+.mt-card-close:focus-visible {
+  outline: 3px solid var(--g499-lemon);
+  outline-offset: 3px;
+}
+
+.mt-assist-icon,
+.mt-assist-icon svg {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+}
+
+/* ---------- Ready ---------- */
+
+.mt-ready {
+  position: absolute;
+  left: calc(var(--g499-rail-inset) + (100% - var(--g499-rail-inset)) / 2);
+  bottom: calc(26% + var(--g499-safe-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  z-index: 24;
+  pointer-events: none;
+}
+
+.mt-ready[hidden] {
+  display: none;
+}
+
+.mt-go {
+  width: 96px;
+  height: 96px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #c8ffd2, var(--g499-lime) 45%, #3fbf73);
+  color: var(--g499-ink);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.45),
+    0 0 0 6px rgba(140, 233, 154, 0.25),
+    inset 0 -4px 0 rgba(0, 0, 0, 0.18),
+    inset 0 3px 0 rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  pointer-events: auto;
+  animation: mt-breathe 1.8s ease-in-out infinite;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mt-go:active {
+  transform: scale(0.94);
+}
+
+.mt-go-icon,
+.mt-go-icon svg {
+  display: inline-flex;
+  width: 46px;
+  height: 46px;
+  margin-left: 4px;
+  fill: currentColor;
+}
+
+.mt-ready-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(10, 12, 32, 0.7);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.mt-ready-tip span,
+.mt-ready-tip svg {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  color: var(--g499-mint);
+}
+
+/* ---------- Cards: picker, help, debrief ---------- */
+
+.mt-title-icon,
+.mt-title-icon svg,
+.mt-btn-icon,
+.mt-btn-icon svg {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  vertical-align: -4px;
+}
+
+.mt-picker-card,
+.mt-help-card,
+.mt-debrief-card {
+  position: relative;
+  max-width: min(94vw, 720px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mt-picker-card h2,
+.mt-help-card h2 {
+  font-size: 26px;
+}
+
+.mt-card-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--g499-touch);
+  height: var(--g499-touch);
+  border: 0;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--g499-cream);
+  cursor: pointer;
+}
+
+.mt-card-close[hidden] {
+  display: none;
+}
+
+.mt-card-close svg {
+  width: 26px;
+  height: 26px;
+}
+
+.mt-site-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+@media (max-width: 560px), (orientation: portrait) and (max-width: 720px) {
+  .mt-site-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.mt-site {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 150px;
+  padding: 14px 10px 12px;
+  border: 0;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03));
+  color: var(--g499-cream);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transition: transform 160ms cubic-bezier(0.2, 1.4, 0.4, 1);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mt-site:hover {
+  transform: translateY(-2px);
+}
+
+.mt-site:active {
+  transform: scale(0.96);
+}
+
+.mt-site.is-current {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 0 3px rgba(99, 230, 190, 0.6);
+}
+
+.mt-site.is-locked {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.mt-site.is-loading .mt-site-emblem {
+  animation: mt-breathe 0.8s ease-in-out infinite;
+}
+
+.mt-site-emblem {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  color: var(--g499-ink);
+  background: radial-gradient(circle at 35% 30%, #f3f1ec, #b7b2a8 55%, #7e796f);
+  box-shadow:
+    inset -6px -8px 0 rgba(0, 0, 0, 0.12),
+    0 6px 14px rgba(0, 0, 0, 0.35);
+}
+
+.mt-site-emblem[data-level='3'],
+.mt-site-emblem[data-level='4'] {
+  background: radial-gradient(circle at 35% 30%, #fff1d6, #d8b98a 55%, #9b7d55);
+}
+
+.mt-site-emblem[data-level='5'],
+.mt-site-emblem[data-level='6'] {
+  background: radial-gradient(circle at 35% 30%, #ffe0d6, #d99a8a 55%, #9b5d55);
+}
+
+.mt-site-svg {
+  width: 36px;
+  height: 36px;
+}
+
+.mt-site-name {
+  font-size: 15px;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.mt-site-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.mt-site-dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.mt-site-dots i.is-on {
+  background: var(--g499-tangerine);
+}
+
+.mt-site-stars {
+  display: flex;
+  gap: 2px;
+}
+
+.mt-site-star,
+.mt-site-star svg {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.mt-site-star.is-on {
+  color: var(--g499-lemon);
+}
+
+.mt-help-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+
+.mt-help-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  line-height: 1.3;
+}
+
+.mt-help-icon,
+.mt-help-icon svg {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  color: var(--g499-sky);
+}
+
+.mt-help-keys {
+  margin: 0;
+  opacity: 0.75;
+}
+
+/* Debrief */
+.mt-debrief {
+  align-items: flex-end;
+  padding-bottom: calc(16px + var(--g499-safe-bottom));
+  background: rgba(5, 6, 18, 0.25);
+}
+
+.mt-debrief-card {
+  gap: 12px;
+  padding: 20px;
+  animation: mt-rise 420ms cubic-bezier(0.2, 1.3, 0.4, 1);
+}
+
+.mt-debrief-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mt-outcome-icon,
+.mt-outcome-icon svg {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  color: var(--g499-lemon);
+}
+
+.mt-debrief[data-outcome='bumpy'] .mt-outcome-icon {
+  color: var(--g499-lavender);
+}
+
+.mt-stars {
+  display: flex;
+  gap: 6px;
+}
+
+.mt-star,
+.mt-star svg {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.mt-star.is-on {
+  color: var(--g499-lemon);
+  filter: drop-shadow(0 0 8px rgba(255, 230, 109, 0.6));
+  animation: mt-pop 420ms cubic-bezier(0.2, 1.4, 0.4, 1) backwards;
+}
+
+.mt-star.is-on:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.mt-star.is-on:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+.mt-reason {
+  margin: 0;
+  max-width: 46ch;
+  line-height: 1.35;
+}
+
+.mt-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.mt-stats .g499-hud-pill {
+  padding: 6px 12px;
+  font-size: 16px;
+}
+
+.mt-pill-icon,
+.mt-pill-icon svg {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  color: var(--g499-sky);
+}
+
+.mt-chart {
+  width: 100%;
+  margin: 0;
+}
+
+.mt-chart canvas {
+  display: block;
+  width: 100%;
+  height: 150px;
+  border-radius: 14px;
+  background: rgba(5, 6, 18, 0.45);
+}
+
+.mt-chart figcaption {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.mt-key-height,
+.mt-key-speed {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  border-top: 3px solid var(--g499-mint);
+}
+
+.mt-key-speed {
+  border-top: 3px dashed var(--g499-lemon);
+}
+
+.mt-fact {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(116, 192, 252, 0.1);
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.mt-fact p {
+  margin: 0 0 4px;
+}
+
+.mt-fact-icon,
+.mt-fact-icon svg {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  color: var(--g499-sky);
+}
+
+.mt-debrief-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.mt-debrief-actions .g499-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---------- Phones ---------- */
+
+@media (max-width: 719px) {
+  /* Leave room for the drawer button at the top left. */
+  .mt-hud {
+    left: calc(74px + var(--g499-safe-left));
+    gap: 6px;
+  }
+
+  .mt-gauge {
+    min-height: 40px;
+    padding: 4px 9px;
+    gap: 5px;
+  }
+
+  .mt-big {
+    font-size: 24px;
+  }
+
+  .mt-num {
+    font-size: 16px;
+  }
+
+  .mt-vs-bar,
+  .mt-fuel-bar,
+  .mt-thr-bar {
+    width: 64px;
+  }
+
+  .mt-callout,
+  .mt-badge {
+    top: calc(130px + var(--g499-safe-top));
+  }
+
+  .mt-pad {
+    width: 150px;
+    height: 150px;
+  }
+
+  .mt-touch-on .mt-assist-btn {
+    right: calc(18px + 150px + 12px + var(--g499-safe-right));
+  }
+}
+
+/* Short landscape phones: the slider and pad shrink so the view stays open. */
+@media (max-height: 460px) {
+  .mt-throttle {
+    height: 58vh;
+    min-height: 150px;
+  }
+
+  .mt-pad {
+    width: 140px;
+    height: 140px;
+  }
+
+  .mt-callout,
+  .mt-badge {
+    top: calc(68px + var(--g499-safe-top));
+  }
+
+  .mt-ready {
+    bottom: calc(18% + var(--g499-safe-bottom));
+  }
+}
+
+/* Portrait phones: the helper button sits above the controls, in the middle. */
+@media (orientation: portrait) and (max-width: 719px) {
+  .mt-touch-on .mt-assist-btn {
+    right: auto;
+    left: 50%;
+    bottom: calc(22px + var(--g499-safe-bottom));
+    transform: translateX(-50%);
+  }
+
+  .mt-touch-on .mt-assist-btn:active {
+    transform: translateX(-50%) scale(0.94);
+  }
+
+  .mt-ready {
+    bottom: calc(34% + var(--g499-safe-bottom));
+  }
+}
+
+@keyframes mt-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+
+@keyframes mt-pop {
+  from {
+    opacity: 0;
+    transform: translateX(var(--mt-pop-x, 0)) scale(0.5);
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.mt-callout {
+  --mt-pop-x: -50%;
+}
+
+@keyframes mt-rise {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes mt-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mt-go,
+  .mt-site.is-loading .mt-site-emblem,
+  .mt-gauge[data-band='bad'] .mt-vs-mark,
+  .mt-callout,
+  .mt-star.is-on,
+  .mt-debrief-card {
+    animation: none;
+  }
+
+  .mt-site {
+    transition: none;
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "Moon Touchdown - 499apps Games",
+  "short_name": "Moon",
+  "description": "Fly a lander down to real Moon landing sites and touch down gently before the fuel runs out. No ads, no tracking. Works offline.",
+  "id": "/games/moon-touchdown/",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#0b1030",
+  "background_color": "#0b1030",
+  "categories": ["games", "kids", "education"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

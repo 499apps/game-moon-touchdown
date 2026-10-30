@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+    <meta name="referrer" content="no-referrer">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <title>Moon Touchdown - 499apps Games</title>
+    <meta name="description" content="Fly a lander down to real Moon landing sites and touch down gently before the fuel runs out. No ads, no tracking. Works offline.">
+    <meta name="theme-color" content="#0b1030">
+    <meta name="color-scheme" content="dark">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Moon Touchdown">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <main class="g499-app game-app">
+      <h1 class="g499-sr-only">Moon Touchdown</h1>
+      <div class="game-stage" id="stage"></div>
+
+      <!-- Flight readouts (menus stay in the left rail). Filled in by src/hud.ts. -->
+      <div class="mt-hud" id="hud" hidden>
+        <div class="mt-gauge mt-alt" role="group" aria-label="Height above the ground">
+          <span class="mt-gauge-icon" data-icon="height"></span>
+          <span class="mt-big" id="alt-value">0</span><span class="mt-unit">m</span>
+        </div>
+        <div class="mt-gauge mt-vs" role="group" aria-label="Speed down">
+          <span class="mt-gauge-icon" id="vs-icon" data-icon="down"></span>
+          <div class="mt-vs-bar" aria-hidden="true"><i class="mt-vs-mark" id="vs-mark"></i></div>
+          <span class="mt-num" id="vs-value">0.0</span>
+        </div>
+        <div class="mt-gauge mt-drift" role="group" aria-label="Sideways drift">
+          <svg class="mt-drift-dial" viewBox="-20 -20 40 40" aria-hidden="true">
+            <circle r="17" class="mt-dial-ring"/>
+            <g id="drift-arrow"><path d="M-9 0H8" class="mt-arrow-line"/><path d="M3-5 9 0 3 5" class="mt-arrow-line"/></g>
+            <circle r="2.4" id="drift-dot" class="mt-dial-dot"/>
+          </svg>
+          <span class="mt-num" id="drift-value">0.0</span>
+        </div>
+        <div class="mt-gauge mt-fuel" role="group" aria-label="Fuel in seconds">
+          <span class="mt-gauge-icon" data-icon="fuel"></span>
+          <div class="mt-fuel-bar" aria-hidden="true"><i class="mt-fuel-fill" id="fuel-fill"></i><b class="mt-fuel-mark" id="fuel-mark"></b></div>
+          <span class="mt-num" id="fuel-value">0</span><span class="mt-unit">s</span>
+        </div>
+        <div class="mt-gauge mt-thr" role="group" aria-label="Engine power">
+          <span class="mt-gauge-icon" data-icon="lander"></span>
+          <div class="mt-thr-bar" aria-hidden="true"><i class="mt-thr-fill" id="thr-fill"></i><b class="mt-thr-hover" id="thr-hover"></b></div>
+          <span class="mt-num" id="thr-value">0</span><span class="mt-unit">%</span>
+        </div>
+        <div class="mt-gauge mt-tilt" role="group" aria-label="Tilt">
+          <svg class="mt-tilt-ball" viewBox="-20 -20 40 40" aria-hidden="true">
+            <circle r="17" class="mt-dial-ring"/>
+            <circle r="5.7" class="mt-dial-safe"/>
+            <circle r="3.4" id="tilt-dot" class="mt-tilt-dot"/>
+          </svg>
+        </div>
+      </div>
+
+      <div class="mt-callout" id="callout" role="status" hidden></div>
+      <div class="mt-badge" id="assist-badge" hidden><span class="mt-badge-icon" data-icon="assist"></span><span>Helper</span></div>
+
+      <!-- Touch controls: throttle slider (left thumb) and tilt pad (right thumb). -->
+      <div class="mt-throttle" id="throttle" role="slider" aria-label="Throttle" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-orientation="vertical" hidden>
+        <div class="mt-throttle-track"><i class="mt-throttle-fill" id="throttle-fill"></i><b class="mt-throttle-hover" id="throttle-hover"></b></div>
+        <i class="mt-throttle-knob" id="throttle-knob"></i>
+      </div>
+      <div class="mt-pad" id="tilt-pad" aria-label="Tilt pad: drag to lean the lander" hidden>
+        <i class="mt-pad-knob" id="tilt-knob"></i>
+      </div>
+      <button type="button" class="mt-assist-btn" id="assist-btn" aria-pressed="false" aria-label="Hover helper" hidden>
+        <span class="mt-assist-icon" data-icon="assist"></span>
+      </button>
+
+      <div class="mt-ready" id="ready" hidden>
+        <button type="button" class="mt-go" id="go-btn" aria-label="Go">
+          <span class="mt-go-icon" data-icon="play"></span>
+        </button>
+        <p class="mt-ready-tip"><span data-icon="down"></span> under 2 m/s <span data-icon="target"></span> in the ring</p>
+      </div>
+
+      <div class="g499-overlay mt-picker" id="picker" hidden>
+        <div class="g499-card mt-picker-card">
+          <button type="button" class="mt-card-close" id="picker-close" aria-label="Close" hidden><span data-icon="close"></span></button>
+          <h2><span class="mt-title-icon" data-icon="sites"></span> Pick a landing site</h2>
+          <div class="mt-site-grid" id="site-grid"></div>
+          <button type="button" class="g499-button is-secondary mt-help-open" id="picker-help" aria-label="How to fly">
+            <span class="mt-btn-icon" data-icon="help"></span><span>How to fly</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="g499-overlay mt-help" id="help" hidden>
+        <div class="g499-card mt-help-card">
+          <h2><span class="mt-title-icon" data-icon="lander"></span> How to fly</h2>
+          <ul class="mt-help-list">
+            <li><span class="mt-help-icon" data-icon="controls"></span><span><b>Engine</b> left slider · W/S or ↑/↓ · left stick</span></li>
+            <li><span class="mt-help-icon" data-icon="tilt"></span><span><b>Tilt</b> right pad · A/D or ←/→ side · E/Q away/toward · or I J K L · right stick</span></li>
+            <li><span class="mt-help-icon" data-icon="assist"></span><span><b>Helper</b> big button · Space · A button. It flies down gently for you.</span></li>
+            <li><span class="mt-help-icon" data-icon="down"></span><span><b>Touch down</b> under 2 m/s down, under 1.2 m/s sideways, standing level.</span></li>
+            <li><span class="mt-help-icon" data-icon="fuel"></span><span><b>Fuel</b> counts in seconds of hovering. Chimes at 60 s and 30 s.</span></li>
+            <li><span class="mt-help-icon" data-icon="earth"></span><span>The Moon pulls 1.62 m/s², one sixth of the Earth, so a small push holds you up.</span></li>
+          </ul>
+          <p class="mt-help-keys">P pause · M sound</p>
+          <button type="button" class="g499-button" id="help-close" aria-label="Close">
+            <span class="mt-btn-icon" data-icon="check"></span><span>OK</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="g499-overlay" id="pause" hidden>
+        <div class="g499-card">
+          <h2>Paused</h2>
+          <button type="button" class="g499-button" id="resume" aria-label="Play">
+            <span class="game-pause-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l11-7z"/></svg></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="g499-overlay mt-debrief" id="debrief" hidden>
+        <div class="g499-card mt-debrief-card">
+          <div class="mt-debrief-head">
+            <span class="mt-outcome-icon" id="outcome-icon" aria-hidden="true"></span>
+            <h2 id="outcome-title">Soft touchdown</h2>
+          </div>
+          <div class="mt-stars" id="stars" role="img" aria-label="Stars"></div>
+          <p class="mt-reason" id="outcome-reason" hidden></p>
+          <div class="mt-stats">
+            <span class="g499-hud-pill" aria-label="Speed down at touchdown"><span class="mt-pill-icon" data-icon="down"></span><span id="stat-vs">0</span></span>
+            <span class="g499-hud-pill" aria-label="Sideways speed at touchdown"><span class="mt-pill-icon" data-icon="drift"></span><span id="stat-hs">0</span></span>
+            <span class="g499-hud-pill" aria-label="Distance from the target"><span class="mt-pill-icon" data-icon="target"></span><span id="stat-dist">0</span></span>
+            <span class="g499-hud-pill" aria-label="Fuel left"><span class="mt-pill-icon" data-icon="fuel"></span><span id="stat-fuel">0</span></span>
+            <span class="g499-hud-pill" aria-label="Flight time"><span class="mt-pill-icon" data-icon="clock"></span><span id="stat-time">0</span></span>
+          </div>
+          <figure class="mt-chart">
+            <canvas id="chart" aria-label="Descent chart: height and speed down over time"></canvas>
+            <figcaption><i class="mt-key-height"></i> height <i class="mt-key-speed"></i> speed down</figcaption>
+          </figure>
+          <div class="mt-fact">
+            <span class="mt-fact-icon" data-icon="earth"></span>
+            <div><p id="fact-site"></p><p id="fact-gravity"></p></div>
+          </div>
+          <div class="mt-debrief-actions">
+            <button type="button" class="g499-button" id="retry" aria-label="Try again"><span class="mt-btn-icon" data-icon="again"></span><span>Again</span></button>
+            <button type="button" class="g499-button is-secondary" id="next-site" aria-label="Next site"><span class="mt-btn-icon" data-icon="next"></span><span>Next</span></button>
+            <button type="button" class="g499-button is-secondary" id="open-sites" aria-label="All sites"><span class="mt-btn-icon" data-icon="sites"></span><span>Sites</span></button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>
