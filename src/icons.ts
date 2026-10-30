@@ -15,6 +15,12 @@ const paths = {
   controls:
     '<rect x="3.5" y="4" width="4" height="16" rx="2"/><path d="M3.5 13h4"/><circle cx="16.5" cy="13" r="4.5"/><circle cx="16.5" cy="13" r="1.4"/>',
   slideUp: '<rect x="4" y="3.5" width="5" height="17" rx="2.5"/><path d="M4 15h5"/><path d="M16.5 20V6"/><path d="m12.5 10 4-4 4 4"/>',
+  slider: '<rect x="9" y="3" width="6" height="18" rx="3"/><path d="M7 14h10"/>',
+  pad: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3"/>',
+  keyboard:
+    '<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6 9.5h.01"/><path d="M9.3 9.5h.01"/><path d="M12.6 9.5h.01"/><path d="M15.9 9.5h.01"/><path d="M18.2 9.5h.01"/><path d="M8 14.5h8"/>',
+  gamepad:
+    '<path d="M7 7.5h10a4.5 4.5 0 0 1 4.4 5.4l-.8 3.6a2 2 0 0 1-3.4.9L15 15H9l-2.2 2.4a2 2 0 0 1-3.4-.9l-.8-3.6A4.5 4.5 0 0 1 7 7.5z"/><path d="M8 10.5v3"/><path d="M6.5 12h3"/><path d="M15.5 11h.01"/><path d="M17.5 13h.01"/>',
   help: '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.5v.6"/><path d="M12 16.8h.01"/>',
   star: '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>',
   lock: '<rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',

@@ -427,3 +427,57 @@ Source: `docs/reviews/r2-review.md` (TOP 10 and "DIMENSIONS BELOW 4"). Goal: eve
 - Copy the tables of (b), (d) and (e) into DESIGN section 4 (replace "calc" and "to measure").
 - If (d) misses 3 stars on a site, read its "distance median" and "left min": raise the start fuel about 2.5 kg per missing second only while (a) stays in [10, 25) s.
 - The ready shot, flight frames, debrief and HUD screenshots change. Run `pnpm e2e:update` after a human checks them.
+
+## F4 controls
+
+Source: owner playtest of Catch (same input and Help pattern): "the keyboard controls didn't work, or felt like they didn't". This round edited files only. Nothing ran. The operator runs typecheck, lint, unit tests, build and e2e next. Kit files (`src/kit/**`) are not changed.
+
+### Keyboard path audit
+
+| Way a key got lost | Fix |
+| --- | --- |
+| The kit skips `preventDefault` on key repeats, so a held arrow or Space could scroll the page. | `KeyTracker` prevents the default of every flight key (repeats too) and of the Space repeat while the flight owns the keys. With a card or the drawer open, the keys stay with the page. |
+| A mouse click left the focus on a rail or game button. Space then clicked that button again (for example Restart or Sites). | After a pointer click (`detail > 0`) the button lets go of the focus, unless its handler moved the focus on purpose. Keyboard activation keeps the focus. Hold-to-confirm buttons are not changed. |
+| Ctrl+W, Cmd+S and Alt+arrows were read as held flight keys. | Keys with Ctrl, Cmd or Alt are not flight keys. |
+| A keyup missed while the page was hidden, or under Cmd on macOS, left a key stuck. | Held keys clear on window blur, on `visibilitychange` (hidden) and on a Cmd keyup. A repeat after the focus comes back holds the key again. |
+| Help turned off only on the next frame (after the key event). | An engine key turns Help off on the key event itself. The chip lights on the same event. |
+| W was slow: 0.45 lever per second, about 0.6 s from off to hover. | First-press step plus a faster ramp (item 1). |
+| Layout and IME. | Keys use `KeyboardEvent.code` (physical keys), so AZERTY, Dvorak and an active IME still work. Text fields and contenteditable are ignored. |
+
+### Items
+
+| # | Item | Status | Files |
+| --- | --- | --- | --- |
+| 1 | Immediate response. A new "more engine" press with the lever below 0.08 steps it to 0.08 (engine lit on that frame), then `KEY_LEVER_RATE` 0.85/s: off to hover about 0.26 s, full range about 1.08 s. The HUD throttle, plume and hum follow `flight.state.throttle` on the same frame. Tilt keys reach their command in 50 ms (`KEY_TILT_SLEW` 12/s; sticks and the pad keep 4/s). The instant tilt cue is a white ring on the HUD tilt ball and the lit arrow key cap. The sim attitude lag (`TILT_TAU` 0.25 s, 45°/s) is not changed, so the tuned helper and fuel tests stay valid: the lander leans about 3° at 100 ms and about 10° at 300 ms. | PARTIAL (the lander's own lean at 100 ms is small; the cue is instant) | `src/input/mapping.ts`, `src/hud.ts`, `index.html`, `src/game.css` |
+| 2 | The engine changes hands, visibly. Player engine input while Help flies turns Help off at once (on the key event for keys, on the frame for touch and stick). The Help button and the rail item un-press. The toast "You fly now" (lander icon, `role="status"`, `aria-live="polite"`) shows. Help on shows "Help flies the engine". Design kept: tilt input does not turn Help off. Help keeps the engine and the player steers, and the chip shows "Help" for the engine with the arrow caps for tilt. Help never moves the lever after a player engine press. Pure logic: `handover`, `toastFor`. | DONE | `src/input/control.ts`, `src/main.ts`, `index.html`, `src/game.css` |
+| 3 | HUD input chip: the first item of the HUD row (top left of the stage, right of the rail; right of the drawer button on phones). It shows the device icon (keyboard, touch, gamepad) and who flies the engine ("Help" mint pill or "You"). Keyboard: W and S caps plus 4 arrow caps that fill, outline and sink while held. Touch or gamepad: slider and pad glyphs that light on input. The text is for screen readers. No motion with reduced motion. It replaces the old "Help" badge (the toast uses its place). | DONE | `src/inputChip.ts`, `src/input/control.ts` (`chipView`), `src/icons.ts` (keyboard, gamepad, slider, pad), `index.html`, `src/game.css`, `src/main.ts` |
+| 4 | Key prompts. With the touch pad off, the ready tip says "Press W for engine, ← → arrows to steer, Space for Help" with key caps (new players and solo players). The touch tip stays "Help is on, slide to take over". The How to fly card uses the same key caps (W, S, arrows, Space, P, M). One-time key hint in the first manual flight (not after a solo landing): no flight key for 3 s after Help turns off shows "Press W for engine, ← → to steer, Space for Help" as a prompt. It waits while a low-fuel prompt shows. | DONE | `index.html`, `src/game.css`, `src/main.ts`, `src/input/control.ts` (`keyHintDue`) |
+| 5 | Test API in `state()`: `lastInputSource`, `lastInputAgeMs`, `heldKeys`, `litKeys`, `lever` (the helper's lever while Help flies), `tiltX` and `tiltZ` (player command, degrees), `landerTilt` `{ x, z, deg }` (the real tilt the model is drawn with, degrees), plus `time`, `vx`, `posX`, `toast`, `keyHintShown`. | DONE | `src/main.ts` |
+| 6 | Unit tests (listed below). | DONE | `src/input/control.test.ts`, `src/input/mapping.test.ts` |
+| 7 | e2e `e2e/controls.spec.ts`, desktop Chromium project, built site, `?test=1&live=1` (live clock and render loop, fixed seed, silent audio), real `keyboard.down` / `up` and real waits. It runs in about 10 s after the page loads. | DONE (not run) | `e2e/controls.spec.ts`, `playwright.config.ts` (`testMatch` adds the file) |
+
+Docs: README (who flies, the chip) and DESIGN section 9 (key response, handover, chip, tips).
+
+### New tests
+
+- `src/input/control.test.ts` (new):
+  - key tracker: held by code; repeats prevented; no capture with a card open; clear on blur; Cmd keyup clears; shortcuts, text fields and other keys ignored; Space repeat only; property "every held code is prevented only while captured";
+  - handover: engine input while Help flies turns Help off on the same frame with "You fly now"; tilt keeps Help; the toast texts; W in a helped flight raises the throttle above the helper's on that frame (no jump down);
+  - input source order and chip view (lit caps, who flies, device);
+  - key hint timing (3 s) and its guards.
+- `src/input/mapping.test.ts`: first W press lights the engine on the first frame, then ramps (no second step); off to hover (17%) in 0.35 s or less and the full range in 1.2 s or less; the step stays below hover; S never steps; tilt keys reach the key command in 50 ms, sticks keep the slower slew.
+- `e2e/controls.spec.ts`:
+  1. Pick Tranquility and check the keyboard tip has 4 key caps.
+  2. Control run: Space starts with Help on, the toast says "Help flies the engine", no input for 0.9 s.
+  3. Restart from the rail. The rail button lets go of the focus. Space starts again.
+  4. Hold W. Within 150 ms (wall clock and `lastInputAgeMs`), check: Help is off, throttle > 0, source is 'keyboard', KeyW is held, the W cap is lit, the toast says "You fly now" and the Help button is not pressed. The lever ramps.
+  5. Motion check: the vertical acceleration with W is at least 0.4 m/s² more than in the no-input Help run.
+  6. Hold the left arrow for 300 ms. Check: the left cap is lit, the tilt command is negative and the tilt-ball ring shows. The lander leans left by more than 2° and vx decreases.
+  7. Help on from the rail, then S: Help turns off and the toast says "You fly now".
+  8. Check that `window.scrollY` is 0. No external requests, no console errors, no cookies.
+
+### To do after the run
+
+- Run the static checks and the unit tests, then the new e2e test alone: `pnpm build`, then `pnpm exec playwright test --config playwright.config.ts --project chromium controls.spec.ts`. The config starts `vite preview` on port 4176. `pnpm ci:local` runs it with the rest.
+- The HUD (chip), the ready tip and the help card change, so the screenshot baselines change. Run `pnpm e2e:update` after a human checks the frames.
+- Human playtest on a keyboard: is W at 0.85/s too fast near hover? If yes, try 0.75/s (off to hover 0.29 s, full range 1.23 s: just over the 1.2 s target).

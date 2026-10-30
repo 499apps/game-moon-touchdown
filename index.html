@@ -25,6 +25,8 @@
 
       <!-- Flight readouts (menus stay in the left rail). Filled in by src/hud.ts. -->
       <div class="mt-hud" id="hud" hidden>
+        <!-- Input chip: who flies the engine and the live keys / touch / pad input (src/inputChip.ts). -->
+        <div class="mt-gauge mt-input" id="input-chip" role="group" aria-label="Controls"></div>
         <div class="mt-gauge mt-alt" role="group" aria-label="Height above the ground">
           <span class="mt-gauge-icon" data-icon="height"></span>
           <span class="mt-big" id="alt-value">0</span><span class="mt-unit">m</span>
@@ -57,6 +59,7 @@
             <circle r="17" class="mt-dial-ring"/>
             <circle r="5.7" class="mt-dial-safe"/>
             <circle r="3.4" id="tilt-dot" class="mt-tilt-dot"/>
+            <circle r="4.6" id="tilt-cmd" class="mt-tilt-cmd"/>
           </svg>
         </div>
       </div>
@@ -70,7 +73,8 @@
       </div>
 
       <div class="mt-callout" id="callout" role="status" hidden></div>
-      <div class="mt-badge" id="assist-badge" hidden><span class="mt-badge-icon" data-icon="assist"></span><span>Help</span></div>
+      <!-- Short toast when the engine changes hands: "You fly now" / "Help flies the engine". -->
+      <div class="mt-toast" id="toast" role="status" aria-live="polite" hidden><span class="mt-toast-icon" id="toast-icon"></span><span id="toast-text"></span></div>
 
       <!-- Touch controls: throttle slider (left thumb) and tilt pad (right thumb). -->
       <div class="mt-throttle" id="throttle" role="slider" aria-label="Throttle" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-orientation="vertical" hidden>
@@ -89,8 +93,10 @@
         <button type="button" class="mt-go" id="go-btn" aria-label="Go">
           <span class="mt-go-icon" data-icon="play"></span>
         </button>
-        <!-- First flights: Go starts with the helper on. The slider takes over the engine. -->
-        <p class="mt-ready-tip" id="ready-tip-help"><span data-icon="assist"></span> Help is on <span class="mt-tip-touch"><span data-icon="controls"></span> slide to take over</span><span class="mt-tip-keys"><kbd class="mt-key">W</kbd> to take over</span></p>
+        <!-- First flights: Go starts with the helper on. The slider (or W) takes over the engine. -->
+        <p class="mt-ready-tip" id="ready-tip-help"><span data-icon="assist"></span> Help is on <span data-icon="controls"></span> slide to take over</p>
+        <!-- Keyboard (touch pad off): the same key caps as the input chip and the help card. -->
+        <p class="mt-ready-tip mt-ready-keys" id="ready-tip-keys" hidden><span data-icon="keyboard"></span> Press <kbd class="mt-key">W</kbd> for engine, <kbd class="mt-key">←</kbd><kbd class="mt-key">→</kbd> arrows to steer, <kbd class="mt-key">Space</kbd> for Help</p>
         <p class="mt-ready-tip" id="ready-tip-solo" hidden><span data-icon="down"></span> under 2 m/s <span data-icon="target"></span> in the ring</p>
       </div>
 
@@ -109,14 +115,14 @@
         <div class="g499-card mt-help-card">
           <h2><span class="mt-title-icon" data-icon="lander"></span> How to fly</h2>
           <ul class="mt-help-list">
-            <li><span class="mt-help-icon" data-icon="controls"></span><span><b>Engine</b> left slider (drag up or down) · W/S · left stick</span></li>
-            <li><span class="mt-help-icon" data-icon="tilt"></span><span><b>Tilt</b> right pad · arrow keys or I J K L · right stick</span></li>
-            <li><span class="mt-help-icon" data-icon="assist"></span><span><b>Help</b> big button · Space · A button. It flies the engine for you. You steer to the ring.</span></li>
+            <li><span class="mt-help-icon" data-icon="controls"></span><span><b>Engine</b> left slider (drag up or down) · <kbd class="mt-key">W</kbd> more <kbd class="mt-key">S</kbd> less · left stick</span></li>
+            <li><span class="mt-help-icon" data-icon="tilt"></span><span><b>Tilt</b> right pad · <kbd class="mt-key">←</kbd><kbd class="mt-key">↑</kbd><kbd class="mt-key">↓</kbd><kbd class="mt-key">→</kbd> arrows or I J K L · right stick</span></li>
+            <li><span class="mt-help-icon" data-icon="assist"></span><span><b>Help</b> big button · <kbd class="mt-key">Space</kbd> · A button. It flies the engine for you. You steer to the ring. Press <kbd class="mt-key">W</kbd> or <kbd class="mt-key">S</kbd> to fly the engine yourself.</span></li>
             <li><span class="mt-help-icon" data-icon="down"></span><span><b>Touch down</b> under 2 m/s down, under 1.2 m/s sideways, standing level.</span></li>
             <li><span class="mt-help-icon" data-icon="fuel"></span><span><b>Fuel</b> counts in seconds of hovering. Chimes at 60 s and 30 s. Land with 30 s or more (the star on the bar) for the fuel star.</span></li>
             <li><span class="mt-help-icon" data-icon="earth"></span><span>The Moon pulls 1.62 m/s², one sixth of the Earth, so a small push holds you up.</span></li>
           </ul>
-          <p class="mt-help-keys">P pause · M sound</p>
+          <p class="mt-help-keys"><kbd class="mt-key">P</kbd> pause · <kbd class="mt-key">M</kbd> sound</p>
           <button type="button" class="g499-button" id="help-close" aria-label="Close">
             <span class="mt-btn-icon" data-icon="check"></span><span>OK</span>
           </button>

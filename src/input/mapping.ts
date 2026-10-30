@@ -11,14 +11,24 @@ import { MAX_TILT } from '../sim/constants';
 export const LEVER_OFF = 0.03;
 /** Lever curve exponent: more travel near hover (about 16% thrust, a quarter of the way up) than near full power. */
 export const LEVER_CURVE = 2;
-/** Lever units per second while a throttle key is held. */
-export const KEY_LEVER_RATE = 0.45;
+/**
+ * Lever units per second while a throttle key is held. With the first-press step below, W from
+ * off reaches hover (lever about 0.3) in about 0.26 s and the top in about 1.1 s.
+ */
+export const KEY_LEVER_RATE = 0.85;
+/**
+ * A new "more engine" press (key or stick) with the lever at or near off jumps the lever here at
+ * once: the engine lights on the same frame (just above the lowest throttle), then the rate ramps.
+ */
+export const KEY_START_LEVER = 0.08;
 /** Lever units per second at full gamepad stick or trigger. */
 export const PAD_LEVER_RATE = 0.8;
 /** Share of full tilt a held tilt key asks for. */
 export const KEY_TILT = 0.6;
 /** Tilt units per second (full deflection in a quarter second). */
 export const TILT_SLEW = 4;
+/** Tilt units per second for keys: a key is all or nothing, so the command follows it in 50 ms. */
+export const KEY_TILT_SLEW = 12;
 export const DEADZONE = 0.15;
 /** Below this deflection the player is not tilting (the assist may level the lander). */
 export const TILT_ACTIVE = 0.05;
@@ -65,6 +75,8 @@ export interface Intent {
   /** Tilt -1..1: +x = right (east), +z = toward the camera (south). */
   tiltX: number;
   tiltZ: number;
+  /** Tilt command slew (units per second) when faster than TILT_SLEW (keys); unset = TILT_SLEW. */
+  tiltSlew?: number;
 }
 
 export const emptyIntent = (): Intent => ({ lever: null, leverRate: 0, tiltX: 0, tiltZ: 0 });
@@ -88,13 +100,22 @@ export const KEYS: Readonly<Record<KeyAction, readonly string[]>> = {
 export const HELD_CODES: ReadonlySet<string> = new Set(Object.values(KEYS).flat());
 
 export function mapKeyboard(held: ReadonlySet<string>): Intent {
-  const on = (a: KeyAction): number => (KEYS[a].some((c) => held.has(c)) ? 1 : 0);
-  return {
+  const on = (a: KeyAction): number => (keyActionHeld(held, a) ? 1 : 0);
+  const tiltX = (on('tiltRight') - on('tiltLeft')) * KEY_TILT;
+  const tiltZ = (on('tiltToward') - on('tiltAway')) * KEY_TILT;
+  const out: Intent = {
     lever: null,
     leverRate: (on('throttleUp') - on('throttleDown')) * KEY_LEVER_RATE,
-    tiltX: (on('tiltRight') - on('tiltLeft')) * KEY_TILT,
-    tiltZ: (on('tiltToward') - on('tiltAway')) * KEY_TILT,
+    tiltX,
+    tiltZ,
   };
+  if (tiltX !== 0 || tiltZ !== 0) out.tiltSlew = KEY_TILT_SLEW;
+  return out;
+}
+
+/** A key for this action is held. */
+export function keyActionHeld(held: ReadonlySet<string>, a: KeyAction): boolean {
+  return KEYS[a].some((c) => held.has(c));
 }
 
 /** Standard gamepad: left stick Y = throttle (up = more), right stick = tilt, RT/LT = throttle. */
@@ -144,6 +165,7 @@ export function mergeIntents(list: readonly Intent[]): Intent {
     out.tiltZ += i.tiltZ;
     out.leverRate += i.leverRate;
     if (i.lever !== null) out.lever = i.lever;
+    if (i.tiltSlew !== undefined) out.tiltSlew = Math.max(out.tiltSlew ?? 0, i.tiltSlew);
   }
   const m = Math.hypot(out.tiltX, out.tiltZ);
   if (m > 1) {
@@ -163,11 +185,16 @@ export interface ShapedControls {
   tiltActive: boolean;
 }
 
-/** Turns intents into smooth, rate-limited controls. */
+/**
+ * Turns intents into smooth, rate-limited controls. A new "more engine" rate (key or stick) with
+ * the lever below KEY_START_LEVER steps it there first, so the engine answers on the same frame.
+ */
 export class ControlShaper {
   private lever = 0;
   private tx = 0;
   private tz = 0;
+  /** A "more engine" rate was asked in the last update (to find a new press). */
+  private wasUp = false;
 
   get leverPosition(): number {
     return this.lever;
@@ -182,13 +209,20 @@ export class ControlShaper {
     this.setLever(lever);
     this.tx = 0;
     this.tz = 0;
+    this.wasUp = false;
   }
 
   update(intent: Intent, dt: number): ShapedControls {
+    const up = intent.lever === null && intent.leverRate > 0;
     if (intent.lever !== null) this.lever = clampN(intent.lever, 0, 1);
-    else this.lever = clampN(this.lever + intent.leverRate * dt, 0, 1);
-    this.tx = rateLimit(this.tx, clampN(intent.tiltX, -1, 1), TILT_SLEW, dt);
-    this.tz = rateLimit(this.tz, clampN(intent.tiltZ, -1, 1), TILT_SLEW, dt);
+    else {
+      if (up && !this.wasUp && this.lever < KEY_START_LEVER) this.lever = KEY_START_LEVER;
+      this.lever = clampN(this.lever + intent.leverRate * dt, 0, 1);
+    }
+    this.wasUp = up;
+    const slew = Math.max(TILT_SLEW, intent.tiltSlew ?? TILT_SLEW);
+    this.tx = rateLimit(this.tx, clampN(intent.tiltX, -1, 1), slew, dt);
+    this.tz = rateLimit(this.tz, clampN(intent.tiltZ, -1, 1), slew, dt);
     return {
       lever: this.lever,
       throttle: leverToThrottle(this.lever),

@@ -25,6 +25,12 @@ export interface HudView {
   fullFuelSeconds: number;
   tiltX: number;
   tiltZ: number;
+  /**
+   * The player's tilt command (rad). A ring on the tilt ball jumps to it on the frame of a key
+   * press, before the lander has turned: the instant tilt cue.
+   */
+  cmdTiltX: number;
+  cmdTiltZ: number;
   /** Applied throttle (0..1) and the throttle that would hover now. */
   throttle: number;
   hoverThrottle: number;
@@ -144,6 +150,7 @@ export class Hud {
   private readonly fuelStar: HTMLElement;
   private readonly fuelGauge: HTMLElement;
   private readonly tiltDot: SVGCircleElement;
+  private readonly tiltCmd: SVGCircleElement;
   private readonly tiltGauge: HTMLElement;
   private readonly thrFill: HTMLElement;
   private readonly thrHover: HTMLElement;
@@ -168,6 +175,7 @@ export class Hud {
     this.fuelStar = must<HTMLElement>(root, '#fuel-star');
     this.fuelGauge = must<HTMLElement>(root, '.mt-fuel');
     this.tiltDot = must<SVGCircleElement>(root, '#tilt-dot');
+    this.tiltCmd = must<SVGCircleElement>(root, '#tilt-cmd');
     this.tiltGauge = must<HTMLElement>(root, '.mt-tilt');
     this.thrFill = must<HTMLElement>(root, '#thr-fill');
     this.thrHover = must<HTMLElement>(root, '#thr-hover');
@@ -239,6 +247,15 @@ export class Hud {
     this.put('tilt', `${tx.toFixed(1)},${tz.toFixed(1)}`, () => {
       this.tiltDot.setAttribute('cx', tx.toFixed(1));
       this.tiltDot.setAttribute('cy', tz.toFixed(1));
+    });
+    const cx = (v.cmdTiltX / MAX_TILT) * 13;
+    const cz = (v.cmdTiltZ / MAX_TILT) * 13;
+    const cmdOn = Math.hypot(cx, cz) > 0.5;
+    this.put('tilt-cmd', cmdOn ? `${cx.toFixed(1)},${cz.toFixed(1)}` : 'none', (s) => {
+      this.tiltCmd.classList.toggle('is-on', s !== 'none');
+      if (s === 'none') return;
+      this.tiltCmd.setAttribute('cx', cx.toFixed(1));
+      this.tiltCmd.setAttribute('cy', cz.toFixed(1));
     });
     const level = Math.hypot(v.tiltX, v.tiltZ) < (10 * Math.PI) / 180;
     this.put('tilt-band', level ? 'good' : 'warn', (s) => (this.tiltGauge.dataset['band'] = s));

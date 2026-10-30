@@ -4,7 +4,9 @@ import { MAX_TILT } from '../sim/constants';
 import {
   ControlShaper,
   KEY_LEVER_RATE,
+  KEY_START_LEVER,
   KEY_TILT,
+  KEY_TILT_SLEW,
   LEVER_OFF,
   TILT_SLEW,
   deadzone,
@@ -153,6 +155,58 @@ describe('control shaper', () => {
         return true;
       }),
     );
+  });
+
+  it('a first W press from off lights the engine on the same frame, then ramps', () => {
+    const s = new ControlShaper();
+    const dt = 1 / 60;
+    const w = mapKeyboard(new Set(['KeyW']));
+    const first = s.update(w, dt);
+    expect(first.lever).toBeCloseTo(KEY_START_LEVER + KEY_LEVER_RATE * dt, 12);
+    expect(first.throttle).toBeGreaterThan(0);
+    // Holding W ramps at the key rate (no second step).
+    const second = s.update(w, dt);
+    expect(second.lever - first.lever).toBeCloseTo(KEY_LEVER_RATE * dt, 12);
+    // Release and press again above the start lever: no step, only the ramp.
+    s.update(emptyIntent(), dt);
+    const again = s.update(w, dt);
+    expect(again.lever - second.lever).toBeCloseTo(KEY_LEVER_RATE * dt, 12);
+  });
+
+  it('W takes off -> hover in 0.35 s or less, and the full range in 1.2 s or less', () => {
+    const dt = 1 / 60;
+    const w = mapKeyboard(new Set(['KeyW']));
+    // The heaviest hover in the game is about 16.8% (DESIGN); check a little more.
+    const hover = 0.17;
+    const timeTo = (done: (o: { throttle: number; lever: number }) => boolean): number => {
+      const s = new ControlShaper();
+      for (let i = 1; i <= 600; i++) if (done(s.update(w, dt))) return i * dt;
+      return Infinity;
+    };
+    expect(timeTo((o) => o.throttle >= hover)).toBeLessThanOrEqual(0.35);
+    expect(timeTo((o) => o.lever >= 1)).toBeLessThanOrEqual(1.2);
+    // The step stays at the low end: one press never jumps past hover.
+    expect(leverToThrottle(KEY_START_LEVER)).toBeLessThan(hover);
+    expect(leverToThrottle(KEY_START_LEVER)).toBeGreaterThan(0);
+  });
+
+  it('S brings the lever down at the same rate and never steps', () => {
+    const s = new ControlShaper();
+    s.setLever(0.5);
+    const out = s.update(mapKeyboard(new Set(['KeyS'])), 1 / 60);
+    expect(out.lever).toBeCloseTo(0.5 - KEY_LEVER_RATE / 60, 12);
+  });
+
+  it('tilt keys reach the full key tilt command in 50 ms', () => {
+    const s = new ControlShaper();
+    const left = mapKeyboard(new Set(['ArrowLeft']));
+    expect(left.tiltSlew).toBe(KEY_TILT_SLEW);
+    let out = s.update(left, 1 / 60);
+    for (let i = 0; i < 2; i++) out = s.update(left, 1 / 60);
+    expect(out.tiltX).toBeCloseTo(-KEY_TILT * MAX_TILT, 9);
+    expect(out.tiltActive).toBe(true);
+    // A stick keeps the gentler slew.
+    expect(mapGamepad(pad([0, 0, 1, 0])).tiltSlew).toBeUndefined();
   });
 
   it('setLever hands the throttle back without a jump', () => {

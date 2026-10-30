@@ -37,6 +37,8 @@ It plays at `https://499apps.com/games/moon-touchdown/`.
 | Sound | Left menu | M | |
 
 Turn the on-screen slider and pad on or off in the left menu ("Touch pad"). They are on by default on touch screens.
+
+Any engine input while Help flies (W, S, the slider or the left stick) gives you the engine at once: Help turns off and "You fly now" shows. Tilting does not turn Help off: Help keeps the engine and you steer. A small chip at the top left of the screen shows who flies the engine ("Help" or "You") and lights the keys you hold.
 "How to fly" in the left menu shows the same table with icons.
 
 ## Code map

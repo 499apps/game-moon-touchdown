@@ -221,6 +221,119 @@
   color: inherit;
 }
 
+/* The player's tilt command: a white ring that jumps on the key press, before the lander turns. */
+.mt-tilt-cmd {
+  fill: none;
+  stroke: var(--g499-white);
+  stroke-width: 1.8;
+  opacity: 0;
+}
+
+.mt-tilt-cmd.is-on {
+  opacity: 1;
+}
+
+/*
+ * Input chip: first item of the HUD row, so it sits at the top left of the stage, right of the
+ * rail (and right of the drawer button on phones). Who flies the engine ("Help" / "You"), then
+ * key caps (keyboard) or the slider and pad glyphs (touch, gamepad). Lit = filled and sunk.
+ */
+.mt-input {
+  margin-right: auto;
+  gap: 8px;
+  padding: 6px 10px;
+}
+
+.mt-input-device,
+.mt-input-device svg,
+.mt-input-who-icon,
+.mt-input-who-icon svg,
+.mt-input-tag,
+.mt-input-tag svg,
+.mt-input-glyph,
+.mt-input-glyph svg {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+}
+
+.mt-input-device {
+  color: var(--g499-sky);
+}
+
+.mt-input-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.mt-input-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 3px;
+  padding: 2px 8px 2px 5px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 2px currentColor;
+  color: var(--g499-cream);
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+/* Help flies the engine: the mint Help pill (the old "Help" badge lives here now). */
+.mt-input[data-engine='help'] .mt-input-who {
+  background: rgba(99, 230, 190, 0.16);
+  color: var(--g499-mint);
+}
+
+.mt-input-tag {
+  margin: 0 2px 0 4px;
+  color: var(--g499-sky);
+}
+
+.mt-cap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: rgba(255, 247, 230, 0.1);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 247, 230, 0.45),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.3);
+  color: var(--g499-cream);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* Held: filled, outlined and pressed down 2 px (readable without colour). */
+.mt-cap.is-on {
+  background: var(--g499-lemon);
+  box-shadow:
+    inset 0 0 0 2px var(--g499-ink),
+    0 0 0 2px var(--g499-lemon);
+  color: var(--g499-ink);
+  transform: translateY(2px);
+}
+
+.mt-input-glyph {
+  color: rgba(255, 247, 230, 0.55);
+}
+
+.mt-input-glyph.is-on {
+  color: var(--g499-lemon);
+  filter: drop-shadow(0 0 4px rgba(255, 224, 102, 0.8));
+}
+
+.mt-input[data-device='keyboard'] .mt-input-glyph,
+.mt-input:not([data-device='keyboard']) .mt-cap {
+  display: none;
+}
+
 .mt-tilt-dot {
   fill: var(--g499-lime);
 }
@@ -395,22 +508,41 @@
   vertical-align: 0.05em;
 }
 
-.mt-badge {
+/* Toast below the input chip: "You fly now" (lemon) / "Help flies the engine" (mint). */
+.mt-toast {
   position: absolute;
   top: calc(120px + var(--g499-safe-top));
   left: calc(14px + var(--g499-rail-inset) + var(--g499-safe-left));
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  padding: 6px 14px 6px 10px;
   border-radius: 999px;
   /* Solid dark backing: readable on bright ground. */
-  background: rgba(10, 12, 32, 0.78);
-  box-shadow: inset 0 0 0 2px var(--g499-mint);
-  color: var(--g499-mint);
+  background: rgba(10, 12, 32, 0.84);
+  box-shadow: inset 0 0 0 2px currentColor;
+  color: var(--g499-lemon);
+  font-size: 18px;
   font-weight: 800;
+  white-space: nowrap;
   pointer-events: none;
   z-index: 21;
+  animation: mt-toast-in 220ms ease-out;
+}
+
+.mt-toast[data-kind='help'] {
+  color: var(--g499-mint);
+}
+
+@keyframes mt-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ---------- Edge arrows (ring and predicted touchdown out of the frame) ---------- */
@@ -517,12 +649,12 @@
   }
 }
 
-.mt-badge[hidden] {
+.mt-toast[hidden] {
   display: none;
 }
 
-.mt-badge-icon,
-.mt-badge-icon svg {
+.mt-toast-icon,
+.mt-toast-icon svg {
   display: inline-flex;
   width: 22px;
   height: 22px;
@@ -782,17 +914,15 @@
   color: var(--g499-mint);
 }
 
-/* "slide to take over" with the touch pad on, a "W" key-cap without it. */
-.mt-tip-touch,
-.mt-tip-keys {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.game-app:not(.mt-touch-on) .mt-tip-touch,
-.mt-touch-on .mt-tip-keys {
-  display: none;
+/* Keyboard tip ("Press W for engine ..."): longer, so it may wrap on narrow windows. */
+.mt-ready-keys {
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: min(90vw, 600px);
+  border-radius: 22px;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.9;
 }
 
 /* ---------- Cards: picker, help, debrief ---------- */
@@ -1393,8 +1523,24 @@
   }
 
   .mt-callout,
-  .mt-badge {
+  .mt-toast {
     top: calc(130px + var(--g499-safe-top));
+  }
+
+  /* Phones: the chip keeps the device icon, who flies and the live glyphs, smaller. */
+  .mt-input {
+    gap: 5px;
+    padding: 4px 8px;
+  }
+
+  .mt-input-who {
+    font-size: 12px;
+  }
+
+  .mt-cap {
+    min-width: 18px;
+    height: 18px;
+    font-size: 11px;
   }
 
   .mt-pad {
@@ -1420,7 +1566,7 @@
   }
 
   .mt-callout,
-  .mt-badge {
+  .mt-toast {
     top: calc(68px + var(--g499-safe-top));
   }
 
@@ -1559,6 +1705,7 @@ html.g499-test .mt-callout {
   .mt-site.is-loading .mt-site-emblem,
   .mt-gauge[data-band='bad'] .mt-vs-mark,
   .mt-callout,
+  .mt-toast,
   .mt-star.is-on,
   .mt-debrief-card,
   .mt-edge.is-pulse .mt-edge-arrow,
@@ -1569,5 +1716,10 @@ html.g499-test .mt-callout {
 
   .mt-site {
     transition: none;
+  }
+
+  /* Held key caps stay filled but do not move. */
+  .mt-cap.is-on {
+    transform: none;
   }
 }

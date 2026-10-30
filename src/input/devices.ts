@@ -3,39 +3,77 @@
  * throttle slider, right tilt pad). They only collect raw state; src/input/mapping.ts turns it
  * into an intent. Edge actions (Space, P, M, gamepad A) come through the kit InputManager.
  */
-import { HELD_CODES, mapGamepad, mapKeyboard, mapTouch, mergeIntents, type Intent, type TouchState } from './mapping';
+import { KeyTracker, type DeviceIntents } from './control';
+import { mapGamepad, mapKeyboard, mapTouch, mergeIntents, type Intent, type TouchState } from './mapping';
 
-/** Keys held down right now (only the flight keys). */
+export interface HeldKeysOptions {
+  /** True while the flight owns the keyboard (no card or drawer open). */
+  capture: () => boolean;
+  /** The held set changed; `pressed` is the code of a new press (null for a release or a clear). */
+  onChange?: (pressed: string | null) => void;
+}
+
+/**
+ * Keys held down right now (only the flight keys), by KeyboardEvent.code so every layout works.
+ * The rules live in KeyTracker (src/input/control.ts). Listeners sit on the window, so a key
+ * still reaches the flight after a click moved the focus to a rail or game button. Held keys are
+ * dropped on window blur and when the page hides (a missed keyup never sticks a key).
+ */
 export class HeldKeys {
-  readonly held = new Set<string>();
-  private readonly onDown = (e: KeyboardEvent) => {
-    const t = e.target as HTMLElement | null;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
-    if (!HELD_CODES.has(e.code)) return;
-    this.held.add(e.code);
-    this.pressed++;
-  };
-  private readonly onUp = (e: KeyboardEvent) => {
-    this.held.delete(e.code);
-  };
-  private readonly onBlur = () => this.held.clear();
+  private readonly tracker = new KeyTracker();
+  private readonly opts: HeldKeysOptions;
   /** Key presses seen (for the test API's input counter). */
   pressed = 0;
 
-  constructor() {
+  private readonly onDown = (e: KeyboardEvent) => {
+    const t = e.target instanceof HTMLElement ? e.target : null;
+    const r = this.tracker.down(
+      {
+        code: e.code,
+        repeat: e.repeat,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        altKey: e.altKey,
+        targetTag: t ? t.tagName : '',
+        editable: t ? t.isContentEditable : false,
+      },
+      this.opts.capture(),
+    );
+    if (r.preventDefault) e.preventDefault();
+    if (r.pressed) {
+      this.pressed++;
+      this.opts.onChange?.(e.code);
+    }
+  };
+  private readonly onUp = (e: KeyboardEvent) => {
+    if (this.tracker.up(e.code)) this.opts.onChange?.(null);
+  };
+  private readonly onBlur = () => this.clear();
+  private readonly onVisibility = () => {
+    if (document.visibilityState === 'hidden') this.clear();
+  };
+
+  constructor(opts: HeldKeysOptions) {
+    this.opts = opts;
     window.addEventListener('keydown', this.onDown);
     window.addEventListener('keyup', this.onUp);
     window.addEventListener('blur', this.onBlur);
+    document.addEventListener('visibilitychange', this.onVisibility);
+  }
+
+  get held(): ReadonlySet<string> {
+    return this.tracker.held;
   }
 
   clear(): void {
-    this.held.clear();
+    if (this.tracker.clear()) this.opts.onChange?.(null);
   }
 
   dispose(): void {
     window.removeEventListener('keydown', this.onDown);
     window.removeEventListener('keyup', this.onUp);
     window.removeEventListener('blur', this.onBlur);
+    document.removeEventListener('visibilitychange', this.onVisibility);
   }
 }
 
@@ -190,11 +228,13 @@ export class TouchControls {
   }
 }
 
-/** All devices merged into one intent for this frame. */
-export function collectIntent(keys: HeldKeys, touch: TouchControls | null): Intent {
-  const list: Intent[] = [mapKeyboard(keys.held)];
+/** Each device's intent for this frame, and all of them merged into one. */
+export function collectDevices(keys: HeldKeys, touch: TouchControls | null): DeviceIntents & { intent: Intent } {
+  const keyboard = mapKeyboard(keys.held);
   const pad = readGamepadIntent();
+  const touchIntent = touch ? mapTouch(touch.state) : null;
+  const list: Intent[] = [keyboard];
   if (pad) list.push(pad);
-  if (touch) list.push(mapTouch(touch.state));
-  return mergeIntents(list);
+  if (touchIntent) list.push(touchIntent);
+  return { keyboard, pad, touch: touchIntent, intent: mergeIntents(list) };
 }

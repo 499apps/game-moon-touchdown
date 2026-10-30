@@ -21,7 +21,7 @@ flowchart LR
 
 1. Pick a site in the picker (it opens on load and from the left rail). Each card shows a small Moon map with the site dot.
 2. Ready: an establishing shot shows the lander, the horizon and the Earth. The lander waits above the site, offset from the target ring and drifting.
-3. Go: until the player has 1 soft landing without the helper, Go starts with the helper on. The engine is never off by surprise. The ready tip says "Help is on, slide to take over" with the touch pad on, and shows a "W" key-cap ("W to take over") without it.
+3. Go: until the player has 1 soft landing without the helper, Go starts with the helper on. The engine is never off by surprise. The ready tip says "Help is on, slide to take over" with the touch pad on. Without it, it says "Press W for engine, arrows to steer, Space for Help" with key caps.
 4. Fly: the camera swoops into the descent view (1.5 s; a cut with reduced motion). Use the engine to slow the fall and tilt to stop the drift. The predicted touchdown ring shows where you will land and how hard. Edge arrows point to the ring and to the predicted touchdown when they are out of the frame.
 5. Touchdown: the judge checks speed down, speed sideways, tilt and ground slope.
 6. Debrief: stars, a descent chart, the touchdown numbers, a Moon map, a fact, a "you vs the real crew" line and a "Talk about it" question. Buttons: Again, Next, Sites.
@@ -217,7 +217,10 @@ A seed plus an input script replays the same trace. A test checks this.
   - The green part of the bar grows to the safe speed, and red is always the right half. The red mark blinks in manual flight only. The debrief chart shows the safe envelope as a soft green band.
 - Touch: the throttle slider is bottom-left, to the right of the rail and inside the safe area. It is **relative**: a drag up or down moves the lever by the drag distance, and a tap changes nothing. The tilt pad is bottom-right. It is relative too: where the thumb lands is the centre. The big **Help** button (a small lander in a cupped hand, with the word "Help") sits between them. It pulses once on the first ready screen.
 - The throttle lever uses a curve (throttle = 10% + 90% · k², k from the lever). Hover (m · 1.62 / 45,000 = 15.5 to 16.8% with the site fuels) sits at k = √((0.16 − 0.1) / 0.9) ≈ 0.26, about a quarter of the way up, with more travel where it matters.
-- Keyboard: W/S engine, arrow keys or I J K L tilt (A/D and E/Q still work). Space = Help. P pause, M sound.
+- Keyboard: W/S engine, arrow keys or I J K L tilt (A/D and E/Q still work). Space = Help. P pause, M sound. Keys are read by `KeyboardEvent.code`, so every layout works.
+- Key response (F4): a first W press from off steps the lever to 0.08 (the engine lights on that frame), then the lever ramps at 0.85 per second: off to hover in about 0.26 s, the full range in about 1.1 s. Tilt keys reach their command in 50 ms; a white ring on the tilt ball shows the command at once, before the lander turns.
+- Who flies: engine input from the player while Help flies turns Help off on the key event itself. The toast says "You fly now"; turning Help on says "Help flies the engine". Tilt input keeps Help on the engine (the player steers). The input chip (top left of the HUD row) shows the device, who flies the engine ("Help" / "You") and lit key caps (or the slider and pad glyphs). This replaces the old "Help" badge.
+- Keyboard ready tip: "Press W for engine, arrows to steer, Space for Help" with key caps. In the first manual flight, if no key is pressed for 3 s after Help turns off, the same keys show once.
 - On Android phones a short buzz marks the touchdown (only with touch controls on, sound on and reduced motion off).
 - Gamepad mappings are in the README.
 - **Debrief layout:** Again / Next / Sites sit in a bar that sticks to the bottom of the card, with a soft fade above it, so they are always in view. On phones (narrower than 720 px or shorter than 500 px) the chart and the fact card fold into a "More" disclosure. The fuel shows once ("Fuel left: N s (star at 30 s)"), not also as a pill.

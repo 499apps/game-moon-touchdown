@@ -8,7 +8,9 @@
  * restart, help, touch pad, how to fly, sound, home and clear-data live in the left rail.
  *
  * Until the player has landed softly once without the helper, Go starts with the helper on (the
- * engine is never off by surprise). Moving the throttle takes over the engine at once.
+ * engine is never off by surprise). Moving the throttle takes over the engine at once: Help turns
+ * off on the key press itself (not a frame later), the toast says "You fly now" and the HUD input
+ * chip shows who flies. Tilt input keeps Help on the engine; the player steers.
  */
 import './kit/styles.css';
 import './game.css';
@@ -21,8 +23,21 @@ import { EdgeArrow, arrowInsets, placeEdge, type Insets } from './edgeArrows';
 import { drawDescentChart } from './graphs';
 import { Hud, vsLimits } from './hud';
 import { moonIcon, type MoonIcon } from './icons';
-import { HeldKeys, TouchControls, collectIntent } from './input/devices';
-import { ControlShaper, throttleToLever } from './input/mapping';
+import {
+  TOAST_TEXT,
+  activeSource,
+  activityOf,
+  chipView,
+  handover,
+  keyHintDue,
+  toastFor,
+  type Activity,
+  type LastSource,
+  type Toast,
+} from './input/control';
+import { HeldKeys, TouchControls, collectDevices } from './input/devices';
+import { ControlShaper, KEYS, throttleToLever } from './input/mapping';
+import { InputChip } from './inputChip';
 import { moonMapSvg } from './moonMap';
 import {
   CONTROLS_KEY,
@@ -38,7 +53,7 @@ import { MoonScene, SUN, type ScenePhase, type ScreenPoint } from './scene/moonS
 import { bakeSunShadow } from './scene/shade';
 import type { TerrainSource } from './scene/terrainView';
 import { assistFuelNeed, lowFuelPrompt, type LowFuelPrompt } from './sim/assist';
-import { DT, LEG_DROP, STAR_FUEL_SECONDS } from './sim/constants';
+import { DEG, DT, LEG_DROP, STAR_FUEL_SECONDS } from './sim/constants';
 import { Flight, flyHelper, type FlightEvent, type FlightResult, type PilotInput } from './sim/flight';
 import {
   BUMP_TEXT,
@@ -85,6 +100,10 @@ const PHONE_WIDTH = 720;
 const PHONE_SHORT = 500;
 /** Default HUD band (px) before the HUD is measured. */
 const DEFAULT_HUD_BAND = 64;
+/** Seconds the "You fly now" / "Help flies the engine" toast stays. */
+const TOAST_TIME = 1.8;
+/** Engine keys: a press of one while Help flies hands the engine over on the key event itself. */
+const ENGINE_CODES: ReadonlySet<string> = new Set([...KEYS.throttleUp, ...KEYS.throttleDown]);
 
 function must<T extends Element>(selector: string): T {
   const el = document.querySelector<T>(selector);
@@ -96,7 +115,9 @@ const appEl = must<HTMLElement>('.game-app');
 const stageHost = must<HTMLElement>('#stage');
 const hudEl = must<HTMLElement>('#hud');
 const calloutEl = must<HTMLElement>('#callout');
-const assistBadge = must<HTMLElement>('#assist-badge');
+const toastEl = must<HTMLElement>('#toast');
+const toastIcon = must<HTMLElement>('#toast-icon');
+const toastText = must<HTMLElement>('#toast-text');
 const assistBtn = must<HTMLButtonElement>('#assist-btn');
 const readyEl = must<HTMLElement>('#ready');
 const goBtn = must<HTMLButtonElement>('#go-btn');
@@ -131,6 +152,7 @@ const factCrew = must<HTMLElement>('#fact-crew');
 const factTalkText = must<HTMLElement>('#fact-talk-text');
 const readyTipHelp = must<HTMLElement>('#ready-tip-help');
 const readyTipSolo = must<HTMLElement>('#ready-tip-solo');
+const readyTipKeys = must<HTMLElement>('#ready-tip-keys');
 const tiltPadEl = must<HTMLElement>('#tilt-pad');
 const edgeRing = new EdgeArrow(must<HTMLElement>('#edge-ring'));
 const edgeMarker = new EdgeArrow(must<HTMLElement>('#edge-marker'));
@@ -202,10 +224,28 @@ const testFuel = (() => {
   const v = Number(new URLSearchParams(window.location.search).get('fuel'));
   return Number.isFinite(v) && v > 0 ? v : null;
 })();
+/** Where the last control input came from ('helper' = Help took the engine), and when (ms). */
+let lastSource: LastSource = null;
+let lastInputAt = 0;
+/** Engine and tilt input from any device in the last frame (lights the chip glyphs). */
+let activity: Activity = { engine: false, tilt: false };
+/** Seconds of manual flight with no player input since Help turned off (for the key hint). */
+let manualIdle = 0;
+/** The one-time key hint already showed on this page; Help turned off in this flight. */
+let keyHintShown = false;
+let helpOffInFlight = false;
+/** Seconds the toast stays, and the toast on screen. */
+let toastLeft = 0;
+let toastNow: Toast = null;
 const sources = new Map<string, TerrainSource>();
 const shaper = new ControlShaper();
-const keys = new HeldKeys();
+const keys = new HeldKeys({
+  // Flight keys belong to the flight while no card or drawer is open: no page scroll then.
+  capture: () => !cardOpen() && !shell.menu.isOpen(),
+  onChange: (pressed) => onKeysChanged(pressed),
+});
 const hud = new Hud(hudEl);
+const inputChip = new InputChip(must<HTMLElement>('#input-chip'));
 
 const shell = createShell({
   title: 'Moon Touchdown',
@@ -361,6 +401,9 @@ function prepareRun(site: SiteInfo, src: TerrainSource): void {
   promptShown = null;
   fuelOutHeight = null;
   fuelOutHelped = false;
+  manualIdle = 0;
+  helpOffInFlight = false;
+  hideToast();
   edgeRing.pulse(false);
   tiltPadEl.classList.remove('is-pulse');
   // The first ready screen of a new player: the Help button pulses once.
@@ -394,6 +437,10 @@ function goWithDefaultHelp(forceHelp: boolean): void {
   startFlight();
 }
 
+/**
+ * Help on or off. In a flight (or on the ready screen) the change shows at once: the Help button
+ * and the rail item press or un-press, the toast says who flies, and the input chip follows.
+ */
 function setAssist(on: boolean): void {
   if (assist === on) {
     renderAssist();
@@ -402,9 +449,60 @@ function setAssist(on: boolean): void {
   assist = on;
   // Hand the engine back at the throttle the helper was using: no jump.
   if (!on && flight) shaper.setLever(throttleToLever(flight.state.throttle));
+  if (on) noteInput('helper');
+  else if (phase === 'flying') helpOffInFlight = true;
+  manualIdle = 0;
   sounds.assist(on);
+  if (phase === 'flying' || phase === 'ready') showToast(toastFor(on));
   renderAssist();
+  renderChip();
   stage.requestRender();
+}
+
+/** Remember where the last control input came from. */
+function noteInput(source: LastSource): void {
+  lastSource = source;
+  lastInputAt = performance.now();
+}
+
+/** Toast: "You fly now" (lander icon) or "Help flies the engine" (Help icon), polite live region. */
+function showToast(kind: Toast): void {
+  if (!kind) return;
+  toastNow = kind;
+  toastEl.dataset['kind'] = kind;
+  toastIcon.innerHTML = moonIcon(kind === 'help' ? 'assist' : 'lander');
+  toastText.textContent = TOAST_TEXT[kind];
+  toastEl.hidden = false;
+  toastLeft = TOAST_TIME;
+}
+
+function hideToast(): void {
+  toastEl.hidden = true;
+  toastNow = null;
+  toastLeft = 0;
+}
+
+/**
+ * A flight key went down or up. A new press counts as keyboard input at once. An engine key while
+ * Help flies hands the engine over on this event, not a frame later; the chip lights now.
+ */
+function onKeysChanged(pressed: string | null): void {
+  if (pressed !== null) {
+    noteInput('keyboard');
+    manualIdle = 0;
+    const live = (phase === 'flying' || phase === 'ready') && !paused && !cardOpen();
+    if (live && phase === 'flying') {
+      const h = handover(assist, { engine: ENGINE_CODES.has(pressed), tilt: false });
+      if (h.assist !== assist) setAssist(h.assist);
+    }
+  }
+  renderChip();
+  stage.requestRender();
+}
+
+/** The HUD input chip from the current state. */
+function renderChip(): void {
+  inputChip.update(chipView({ assist, touchOn, last: lastSource, held: keys.held, activity }));
 }
 
 function setPaused(p: boolean): void {
@@ -473,7 +571,7 @@ function onTouchdown(r: FlightResult): void {
 function showCallout(
   text: string,
   band: 'warn' | 'bad',
-  opts: { icon?: MoonIcon; prompt?: boolean; key?: string } = {},
+  opts: { icon?: MoonIcon; prompt?: boolean; key?: string; parts?: readonly (string | { key: string })[] } = {},
 ): void {
   calloutEl.textContent = '';
   if (opts.icon) {
@@ -483,11 +581,16 @@ function showCallout(
     calloutEl.append(icon);
   }
   calloutEl.append(document.createTextNode(text));
-  if (opts.key) {
+  const keyCap = (label: string) => {
     const key = document.createElement('kbd');
     key.className = 'mt-key';
-    key.textContent = opts.key;
+    key.textContent = label;
     calloutEl.append(key);
+  };
+  if (opts.key) keyCap(opts.key);
+  for (const p of opts.parts ?? []) {
+    if (typeof p === 'string') calloutEl.append(document.createTextNode(` ${p} `));
+    else keyCap(p.key);
   }
   calloutEl.classList.toggle('is-prompt', opts.prompt === true);
   calloutEl.dataset['band'] = band;
@@ -536,6 +639,33 @@ function updateLowFuelPrompt(f: Flight): void {
     if (touchOn) showCallout('Brake now: slide up', 'warn', { icon: 'slideUp', prompt: true });
     else showCallout('Brake now: hold', 'warn', { icon: 'slideUp', prompt: true, key: 'W' });
   }
+}
+
+/**
+ * First manual flight with the keyboard: when no flight key is pressed for 3 s after Help turned
+ * off, show the keys once, with the same key caps as the ready tip and the help card.
+ */
+function updateKeyHint(dt: number): void {
+  if (assist) {
+    manualIdle = 0;
+    return;
+  }
+  manualIdle += dt;
+  const due = keyHintDue({
+    flying: phase === 'flying' && !paused,
+    assist,
+    keyboard: !touchOn,
+    done: keyHintShown || progress.solo || !helpOffInFlight,
+    idle: manualIdle,
+  });
+  // A low-fuel prompt on screen goes first; the hint waits for it.
+  if (!due || !calloutEl.hidden) return;
+  keyHintShown = true;
+  showCallout('Press', 'warn', {
+    icon: 'keyboard',
+    prompt: true,
+    parts: [{ key: 'W' }, 'for engine,', { key: '←' }, { key: '→' }, 'to steer,', { key: 'Space' }, 'for Help'],
+  });
 }
 
 // ---------- Overlays ----------
@@ -705,7 +835,6 @@ function renderAssist(): void {
   renderToggleItem('assist', assist, 'assist', 'Hover helper');
   assistBtn.setAttribute('aria-pressed', assist ? 'true' : 'false');
   assistBtn.classList.toggle('is-on', assist);
-  assistBadge.hidden = !(assist && (phase === 'flying' || phase === 'ready'));
 }
 
 function updateUi(): void {
@@ -713,9 +842,11 @@ function updateUi(): void {
   const cardOpen = !pickerEl.hidden || !helpEl.hidden;
   hud.setVisible(phase !== 'pick');
   readyEl.hidden = phase !== 'ready' || paused || cardOpen;
-  // New players: "Help is on, slide to take over". After a solo landing: the touchdown goals.
-  readyTipHelp.hidden = progress.solo;
+  // Touch, new players: "Help is on, slide to take over". After a solo landing: the touchdown
+  // goals. Keyboard (touch pad off): "Press W for engine, arrows to steer, Space for Help".
+  readyTipHelp.hidden = progress.solo || !touchOn;
   readyTipSolo.hidden = !progress.solo;
+  readyTipKeys.hidden = touchOn;
   // The pause card waits under the site picker and the help card.
   pauseOverlay.hidden = !paused || cardOpen;
   const showTouch = touchOn && flyingish && !paused;
@@ -724,8 +855,12 @@ function updateUi(): void {
   appEl.classList.toggle('mt-touch-on', showTouch);
   assistBtn.hidden = !flyingish || paused || cardOpen;
   if (phase !== 'landed') debriefEl.hidden = true;
-  if (!flyingish) calloutEl.hidden = true;
+  if (!flyingish) {
+    calloutEl.hidden = true;
+    hideToast();
+  }
   renderAssist();
+  renderChip();
   shell.menu.refresh();
   stage.requestRender();
 }
@@ -738,8 +873,16 @@ function sceneLander(): LanderState {
 
 function update(dt: number): void {
   const f = flight;
-  if (f && phase === 'ready' && !paused && !cardOpen()) {
-    const intent = collectIntent(keys, touchOn ? touch : null);
+  const live = (phase === 'ready' || phase === 'flying') && !paused && !cardOpen();
+  const dev = collectDevices(keys, touchOn ? touch : null);
+  const intent = dev.intent;
+  activity = live ? activityOf(intent) : { engine: false, tilt: false };
+  const source = live ? activeSource(dev) : null;
+  if (source) {
+    noteInput(source);
+    manualIdle = 0;
+  }
+  if (f && phase === 'ready' && live) {
     // Any engine or tilt input starts the descent. Engine input flies by hand; a tilt-only start
     // keeps the default helper for new players, so the engine is not off by surprise.
     const engine = intent.leverRate > 0 || (intent.lever !== null && intent.lever > 0.05);
@@ -750,9 +893,12 @@ function update(dt: number): void {
     }
   }
   if (f && phase === 'flying' && !paused) {
-    const intent = collectIntent(keys, touchOn ? touch : null);
-    if (assist && (intent.lever !== null || intent.leverRate !== 0)) setAssist(false);
+    // Player engine input takes the engine from Help on this frame (keys already did on the key
+    // event). Help never moves the lever after that.
+    const h = handover(assist, activityOf(intent));
+    if (h.assist !== assist) setAssist(h.assist);
     if (assist && f.altitude < HELPED_HEIGHT) helpedRun = true;
+    updateKeyHint(dt);
     // Helper flight: at 200 m, pulse the ring arrow and the tilt pad once ("you steer").
     if (assist && !steerHinted && f.altitude < STEER_HINT_HEIGHT) {
       steerHinted = true;
@@ -783,6 +929,11 @@ function update(dt: number): void {
     calloutLeft -= dt;
     if (calloutLeft <= 0) calloutEl.hidden = true;
   }
+  if (toastLeft > 0 && !paused) {
+    toastLeft -= dt;
+    if (toastLeft <= 0) hideToast();
+  }
+  renderChip();
   sounds.engine(f && phase === 'flying' && !paused ? f.state.throttle : 0, dt);
 
   if (f && phase !== 'pick') {
@@ -796,6 +947,8 @@ function update(dt: number): void {
       fullFuelSeconds: fullFuel,
       tiltX: s.tiltX,
       tiltZ: s.tiltZ,
+      cmdTiltX: phase === 'flying' && !paused ? lastInput.tiltX : 0,
+      cmdTiltZ: phase === 'flying' && !paused ? lastInput.tiltZ : 0,
       throttle: phase === 'flying' ? s.throttle : 0,
       hoverThrottle: hoverThrottle(s),
       assist,
@@ -964,6 +1117,8 @@ stage.input.on((action, source) => {
   actions++;
   switch (action) {
     case 'primary':
+      if (source === 'keyboard') noteInput('keyboard');
+      else if (source === 'gamepad') noteInput('pad');
       onPrimary(source);
       return;
     case 'pause':
@@ -1037,9 +1192,28 @@ shell.menu.toggleButton.addEventListener('click', () => {
   if (shell.menu.isOpen() && phase === 'flying' && !paused) setPaused(true);
 });
 
-// Leaving the page (tab switch, app switch) pauses; the lander waits in the sky.
+// Leaving the page (tab switch, app switch) pauses; the lander waits in the sky. HeldKeys drops
+// the held keys too, so no key sticks when the page comes back.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && phase === 'flying') setPaused(true);
+});
+
+/**
+ * A mouse or touch click on a rail or game button leaves the focus on it, and Space would click
+ * that button again instead of reaching the flight. After such a click (detail > 0; keyboard
+ * activation has detail 0 and keeps the focus for keyboard users), the button lets go of the
+ * focus, unless its handler moved the focus on purpose (help card, debrief, drawer).
+ * Hold-to-confirm buttons keep it (blur cancels the hold).
+ */
+document.addEventListener('click', (e) => {
+  if (e.detail === 0) return;
+  // The dispatch path, not target.closest(): a handler may swap the button's icon markup, which
+  // detaches the clicked SVG node from its button before this listener runs.
+  const btn = e
+    .composedPath()
+    .find((n): n is HTMLElement => n instanceof HTMLElement && n.matches('button, summary'));
+  if (!btn || btn.classList.contains('g499-menu-hold')) return;
+  if (document.activeElement === btn) btn.blur();
 });
 
 // The HUD band changes when the HUD shows, wraps or resizes: the camera and the arrows follow.
@@ -1093,6 +1267,23 @@ function testState(): Record<string, unknown> {
     unlocked: progress.unlocked,
     touchControls: touchOn,
     stepFrames: TEST_STEP_FRAMES,
+    // Controls (F4): where the last input came from and how long ago (ms), the held keys, the
+    // lever (the helper's lever while Help flies), the player's tilt command and the lander's
+    // real tilt (the model is drawn with it), both in degrees: +x = right (east), +z = toward
+    // the camera (south).
+    lastInputSource: lastSource,
+    lastInputAgeMs: lastSource === null ? null : performance.now() - lastInputAt,
+    heldKeys: Array.from(keys.held),
+    litKeys: inputChip.litCaps(),
+    lever: assist && f ? throttleToLever(f.state.throttle) : shaper.leverPosition,
+    tiltX: lastInput.tiltX / DEG,
+    tiltZ: lastInput.tiltZ / DEG,
+    landerTilt: f ? { x: f.state.tiltX / DEG, z: f.state.tiltZ / DEG, deg: Math.hypot(f.state.tiltX, f.state.tiltZ) / DEG } : null,
+    time: f ? f.state.t : 0,
+    vx: f ? f.state.vel.x : 0,
+    posX: f ? f.state.pos.x : 0,
+    toast: toastNow ? TOAST_TEXT[toastNow] : null,
+    keyHintShown,
   };
 }
 
