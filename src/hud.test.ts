@@ -17,6 +17,7 @@ import {
   VS_STRICT_HEIGHT,
   VS_YELLOW,
   fuelMarkPercent,
+  markerBand,
   speedBand,
   vsBand,
   vsBarMax,
@@ -265,6 +266,28 @@ describe('fuel bar marks', () => {
     expect(fuelMarkPercent(60, 40)).toBe(100);
     expect(fuelMarkPercent(-5, 75)).toBe(0);
     expect(fuelMarkPercent(30, Number.NaN)).toBe(100);
+  });
+});
+
+describe('touchdown marker colour (R4 finding 1)', () => {
+  const bumpyFast = { outcome: 'bumpy' as const, vs: 11.9 };
+  const soft = { outcome: 'soft' as const, vs: 1.2 };
+
+  it('manual flight up high follows the HUD speed band, not the prediction', () => {
+    const at = (band: Band) => markerBand(bumpyFast, { assist: false, band, altitude: 250 });
+    expect(at('slow')).toBe('good');
+    expect(at('good')).toBe('good');
+    expect(at('warn')).toBe('warn');
+    expect(at('bad')).toBe('bad');
+    expect(markerBand(bumpyFast, { assist: false, band: 'good', altitude: VS_STRICT_HEIGHT })).toBe('good');
+  });
+
+  it('below the strict height and in helper flight it shows the predicted touchdown', () => {
+    expect(markerBand(bumpyFast, { assist: false, band: 'good', altitude: VS_STRICT_HEIGHT - 0.1 })).toBe('bad');
+    expect(markerBand({ outcome: 'bumpy', vs: 3 }, { assist: false, band: 'good', altitude: 5 })).toBe('warn');
+    expect(markerBand(soft, { assist: false, band: 'bad', altitude: 5 })).toBe('good');
+    expect(markerBand(bumpyFast, { assist: true, band: 'good', altitude: 250 })).toBe('bad');
+    expect(markerBand(soft, { assist: true, band: 'bad', altitude: 250 })).toBe('good');
   });
 });
 

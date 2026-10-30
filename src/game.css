@@ -436,15 +436,19 @@
 }
 
 /*
- * While the helper flies, low fuel below the star line is not danger (the helper still lands
- * softly): the bar and the number stay lemon. Red is for manual flight only.
+ * While the helper flies, or while it could still land softly (data-fuel-calm, R4 finding 1), low
+ * fuel below the star line is not danger: the bar and the number stay lemon. Red means "the
+ * helper cannot save it now".
  */
-.mt-hud[data-assist='on'] .mt-fuel[data-band='bad'] .mt-fuel-fill {
+.mt-hud[data-assist='on'] .mt-fuel[data-band='bad'] .mt-fuel-fill,
+.mt-hud[data-fuel-calm='on'] .mt-fuel[data-band='bad'] .mt-fuel-fill {
   background: linear-gradient(90deg, var(--g499-tangerine), var(--g499-lemon));
 }
 
 .mt-hud[data-assist='on'] .mt-fuel[data-band='bad'] .mt-num,
-.mt-hud[data-assist='on'] .mt-fuel[data-band='bad'] .mt-gauge-icon {
+.mt-hud[data-assist='on'] .mt-fuel[data-band='bad'] .mt-gauge-icon,
+.mt-hud[data-fuel-calm='on'] .mt-fuel[data-band='bad'] .mt-num,
+.mt-hud[data-fuel-calm='on'] .mt-fuel[data-band='bad'] .mt-gauge-icon {
   color: var(--mt-warn);
 }
 

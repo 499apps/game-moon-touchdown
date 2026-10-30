@@ -21,7 +21,7 @@ import { createStage } from './kit/stage';
 import { readTestMode } from './kit/test-mode';
 import { EdgeArrow, arrowInsets, placeEdge, type Insets } from './edgeArrows';
 import { drawDescentChart } from './graphs';
-import { Hud, SLOW_CUE_TEXT, SlowCue, speedBand, vsLimits, type Band } from './hud';
+import { Hud, SLOW_CUE_TEXT, SlowCue, markerBand, speedBand, vsLimits, type Band, type MarkerBand } from './hud';
 import { moonIcon, type MoonIcon } from './icons';
 import {
   TOAST_TEXT,
@@ -49,7 +49,7 @@ import {
   recordRun,
   saveProgress,
 } from './progress';
-import { MoonScene, SUN, type ScenePhase, type ScreenPoint } from './scene/moonScene';
+import { ENGINE_KICK_MS, MoonScene, SUN, type ScenePhase, type ScreenPoint } from './scene/moonScene';
 import { bakeSunShadow } from './scene/shade';
 import type { TerrainSource } from './scene/terrainView';
 import { assistFuelNeed, lowFuelPrompt, type LowFuelPrompt } from './sim/assist';
@@ -106,6 +106,10 @@ const TOAST_TIME = 2.5;
 const MARKER_ARROW_NEAR = 40;
 /** Engine keys: a press of one while Help flies hands the engine over on the key event itself. */
 const ENGINE_CODES: ReadonlySet<string> = new Set([...KEYS.throttleUp, ...KEYS.throttleDown]);
+/** The engine kick runs down by at most this much (ms) per drawn frame: a slow device still draws it 3 times. */
+const KICK_FRAME_MS = 50;
+/** A touch slider move up by more than this (lever units) in one frame counts as "more engine". */
+const SLIDER_RISE = 0.002;
 
 function must<T extends Element>(selector: string): T {
   const el = document.querySelector<T>(selector);
@@ -244,6 +248,20 @@ let toastLeft = 0;
 let toastNow: Toast = null;
 /** The speed band the HUD shows now, and the gentle "A bit faster saves fuel" cue (F6). */
 let vsBandNow: Band = 'good';
+/**
+ * Engine kick (R4 finding 2): ms left of the visual kick of a new "more engine" press (W or a
+ * stick from no "more", or the slider moving up from a still lever). Visual only; no shake.
+ */
+let kickMs = 0;
+let upBefore = false;
+let sliderBefore: number | null = null;
+let sliderRising = false;
+/**
+ * Key response (R4 finding 4): performance.now() of the last new flight key press that no
+ * update() applied yet, and the ms from that key handler to the first update() that applied it.
+ */
+let keyPendingAt: number | null = null;
+let keyToFrameMs: number | null = null;
 const slowCue = new SlowCue();
 let slowCues = 0;
 const sources = new Map<string, TerrainSource>();
@@ -415,6 +433,7 @@ function prepareRun(site: SiteInfo, src: TerrainSource): void {
   slowCue.reset();
   slowCues = 0;
   vsBandNow = 'good';
+  kickMs = 0;
   // New players: Help is armed on the ready screen (no toast yet), so the chip, the Help button
   // and the tip ("Help is on, slide to take over") agree. Engine input at ready still flies by
   // hand: the flight starts and Help hands the engine over on that frame ("You fly now").
@@ -528,6 +547,11 @@ function onKeysChanged(pressed: string | null): void {
     noteInput('keyboard');
     manualIdle = 0;
     const live = (phase === 'flying' || phase === 'ready') && !paused && !cardOpen();
+    // Time this press until the first update() that applies it (test state keyToFrameMs).
+    if (live) {
+      keyPendingAt = performance.now();
+      keyToFrameMs = null;
+    }
     if (live && phase === 'flying') {
       const h = handover(assist, { engine: ENGINE_CODES.has(pressed), tilt: false });
       if (h.assist !== assist) setAssist(h.assist);
@@ -568,9 +592,11 @@ function setTouch(on: boolean): void {
 function handleEvents(events: FlightEvent[]): void {
   for (const e of events) {
     if (e.type === 'callout') {
-      if (assist && e.seconds <= STAR_FUEL_SECONDS && helperCanLand()) {
-        // The helper flies: the fuel star is gone, but nothing is wrong. Lemon, not red.
-        showCallout('Fuel star gone. Help still lands safely.', 'warn', { icon: 'fuel' });
+      if (e.seconds <= STAR_FUEL_SECONDS && helperCanLand()) {
+        // The fuel star is gone, but nothing is wrong yet (the helper could still land): lemon, not
+        // red, in helper and in manual flight (R4 finding 1). Red is for "Help cannot save it now".
+        const text = assist ? 'Fuel star gone. Help still lands safely.' : 'Fuel star gone. You can still land.';
+        showCallout(text, 'warn', { icon: 'fuel' });
       } else {
         showCallout(`${e.seconds} seconds of fuel`, e.seconds <= STAR_FUEL_SECONDS ? 'bad' : 'warn', { icon: 'fuel' });
       }
@@ -931,6 +957,10 @@ function update(dt: number): void {
   const dev = collectDevices(keys, touchOn ? touch : null);
   const intent = dev.intent;
   activity = live ? activityOf(intent) : { engine: false, tilt: false };
+  // The engine kick runs down (at most KICK_FRAME_MS per frame), then a new press may start one.
+  if (!paused && kickMs > 0) kickMs = Math.max(0, kickMs - Math.min(dt * 1000, KICK_FRAME_MS));
+  const engineUp = live && intent.lever === null && intent.leverRate > 0;
+  const sliderUp = live && intent.lever !== null && sliderBefore !== null && intent.lever > sliderBefore + SLIDER_RISE;
   const source = live ? activeSource(dev) : null;
   if (source) {
     noteInput(source);
@@ -963,6 +993,12 @@ function update(dt: number): void {
     shaper.setHoverLever(throttleToLever(hoverThrottle(f.state)));
     const c = shaper.update(intent, dt);
     lastInput = { throttle: c.throttle, tiltX: c.tiltX, tiltZ: c.tiltZ, tiltActive: c.tiltActive, assist };
+    if (keyPendingAt !== null) {
+      keyToFrameMs = performance.now() - keyPendingAt;
+      keyPendingAt = null;
+    }
+    // Engine kick on a new "more engine" press: W or a stick, or the slider moving up from still.
+    if ((engineUp && !upBefore) || (sliderUp && !sliderRising)) kickMs = ENGINE_KICK_MS;
     stepCarry += dt;
     while (stepCarry >= DT - 1e-9 && f.phase === 'flying') {
       stepCarry -= DT;
@@ -986,6 +1022,9 @@ function update(dt: number): void {
       }
     }
   }
+  upBefore = engineUp;
+  sliderRising = sliderUp;
+  sliderBefore = live ? intent.lever : null;
   if (phase === 'landed' && !paused) {
     landedFor += dt;
     if (!debriefShown && landedFor >= DEBRIEF_DELAY) showDebrief();
@@ -1017,6 +1056,8 @@ function update(dt: number): void {
       throttle: phase === 'flying' ? s.throttle : 0,
       hoverThrottle: hoverThrottle(s),
       assist,
+      // R4 finding 1: the fuel bar stays lemon while the helper could still land softly.
+      fuelCalm: assist || helperCanLand(),
     });
     if (touchOn) {
       const lever = assist ? throttleToLever(s.throttle) : shaper.leverPosition;
@@ -1048,6 +1089,10 @@ if (stage.kit) {
         cmdTiltX: phase === 'flying' ? lastInput.tiltX : 0,
         cmdTiltZ: phase === 'flying' ? lastInput.tiltZ : 0,
         tiltHeld: phase === 'flying' && activity.tilt,
+        // The marker colour rule (R4 finding 1) and the engine kick (R4 finding 2).
+        assist,
+        band: vsBandNow,
+        kick: phase === 'flying' && kickMs > 0,
       });
       updateEdges(s);
     },
@@ -1184,10 +1229,21 @@ function updateEdges(s: MoonScene): void {
   markerOnScreen = pm.onScreen || seen;
   if (pm.onScreen || seen || near) edgeMarker.hide();
   else {
-    const band = p.outcome === 'soft' ? 'good' : p.vs < 4 ? 'warn' : 'bad';
+    // The same colour as the marker (markerBand): the speed band in manual flight up high.
+    const band = currentMarkerBand() ?? 'good';
     if (edgeMarker.element.dataset['band'] !== band) edgeMarker.element.dataset['band'] = band;
     edgeMarker.show(stageBox.left + pm.x, stageBox.top + pm.y, pm.angle, undefined, pm.x > stageBox.width / 2);
   }
+}
+
+/**
+ * The touchdown marker colour now (R4 finding 1), or null when no marker shows. Manual flight at
+ * 10 m and above: the HUD speed band; below 10 m and with Help: the predicted touchdown.
+ */
+function currentMarkerBand(): MarkerBand | null {
+  const f = flight;
+  if (!f || phase !== 'flying' || !prediction) return null;
+  return markerBand(prediction, { assist, band: vsBandNow, altitude: f.altitude });
 }
 
 /** A card (site picker, help, debrief) is open: flight keys do nothing until it closes. */
@@ -1388,6 +1444,15 @@ function testState(): Record<string, unknown> {
     // the engine's share (0..1) in the halo tint and size high up.
     rcsPuffs: scene ? scene.rcsPuffs : 0,
     haloThrottle: scene ? scene.haloThrottle : 0,
+    // R4 findings 1, 2 and 4: the touchdown marker colour ('good' | 'warn' | 'bad', null with no
+    // marker); the engine kick left (ms); the shaped throttle command of the last frame (the next
+    // sim step uses it); the hover notch (lever units, null before a flight); and the ms from the
+    // last new flight key press to the first update() that applied it (null until applied).
+    markerBand: currentMarkerBand(),
+    kickMs,
+    cmdThrottle: assist && f ? f.state.throttle : lastInput.throttle,
+    hoverLever: shaper.hoverLever,
+    keyToFrameMs,
   };
 }
 

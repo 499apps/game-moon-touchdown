@@ -9,8 +9,8 @@
  * manual flight yellow means "fast but stoppable" and red means "brake now" (vsStopLimit).
  * In manual flight above 10 m a calm "slow" zone sits below green (F6): falling much slower than
  * the helper hovers away the fuel. It is never a failure and never red.
- * While the helper flies, the fuel bar stays lemon below the star line (src/game.css): red is for
- * manual flight only.
+ * While the helper flies, or while the helper could still land softly (manual flight), the fuel bar
+ * stays lemon below the star line (src/game.css): red means "the helper cannot save it now".
  */
 import { assistTargetVs } from './sim/assist';
 import { CALLOUTS, G_MOON, MAX_TILT, STAR_FUEL_SECONDS } from './sim/constants';
@@ -38,6 +38,11 @@ export interface HudView {
   hoverThrottle: number;
   /** The hover helper flies the engine (the speed mark does not blink then). */
   assist: boolean;
+  /**
+   * Low fuel is not danger yet: Help flies, or the helper could still land softly with the fuel
+   * left (R4 finding 1). The fuel bar then stays lemon below the star line, not red.
+   */
+  fuelCalm?: boolean;
 }
 
 /** Speed-down bands near the ground (m/s): green under 2, yellow under 4. */
@@ -143,6 +148,23 @@ export const VS_CLIMB = 0.05;
 export function speedBand(vy: number, height: number, mode?: VsMode): Band {
   const v = Number.isFinite(vy) ? vy : 0;
   return vsBand(v > VS_CLIMB ? 0 : Math.max(0, -v), Math.max(0, height), mode);
+}
+
+/** Colour of the touchdown marker and its edge arrow: lime, lemon or coral. */
+export type MarkerBand = 'good' | 'warn' | 'bad';
+
+/**
+ * The touchdown marker colour (R4 finding 1). In manual flight at VS_STRICT_HEIGHT and above, the
+ * marker follows the HUD speed band (slow and green read lime): with the hover notch, "input held"
+ * keeps the speed to the ground, so the predicted touchdown would read "bumpy" for a correct
+ * descent. Below that height, and in helper flight, it shows the predicted touchdown.
+ */
+export function markerBand(
+  predicted: { outcome: 'soft' | 'bumpy'; vs: number },
+  view: { assist: boolean; band: Band; altitude: number },
+): MarkerBand {
+  if (!view.assist && view.altitude >= VS_STRICT_HEIGHT) return view.band === 'slow' ? 'good' : view.band;
+  return predicted.outcome === 'soft' ? 'good' : predicted.vs < VS_YELLOW ? 'warn' : 'bad';
 }
 
 /** Full scale of the speed bar (m/s): twice the yellow limit, so red is always the right half. */
@@ -337,6 +359,7 @@ export class Hud {
     const mode: VsMode = { assist: v.assist, hoverThrottle: v.hoverThrottle };
     this.put('vs-band', speedBand(v.vy, alt, mode), (s) => (this.vsGauge.dataset['band'] = s));
     this.put('assist', v.assist ? 'on' : 'off', (s) => (this.root.dataset['assist'] = s));
+    this.put('fuel-calm', v.assist || v.fuelCalm === true ? 'on' : 'off', (s) => (this.root.dataset['fuelCalm'] = s));
     // Zone gauge: the striped slow zone (manual flight up high), then green, yellow and red.
     const lim = vsLimits(alt, mode);
     const zones = vsBarZones(lim);

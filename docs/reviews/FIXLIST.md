@@ -534,3 +534,26 @@ Source: the operator's run of F5 (f). The real-input novice landed softly 144/14
 - Run `pnpm build`, then the e2e: `controls.spec.ts` (W, S and the notch: the lever ramps while W is held), `touch.spec.ts` (a tap keeps the lever: it should, because the lever is in the notch by then) and the smoke suite.
 - The speed bar (zone gauge, stripes), the How to fly card and the call-out change, so the screenshot baselines change. Run `pnpm e2e:update` after a human checks the frames.
 - Human playtest (DESIGN section 11): also ask "Did the lander keep its speed when you let go?" and "Did you see the striped blue part and the tip?"
+
+## MP1 (first patch)
+
+Source: `docs/reviews/r4-review.md` findings 1, 2 and 4. This round edited files only. Nothing ran: no typecheck, lint, unit tests, build or e2e. Kit files (`src/kit/**`) are not changed.
+
+| # | Item | Status | Files | Tests |
+| --- | --- | --- | --- | --- |
+| 1 | R4 finding 1. Marker and edge arrow: in manual flight at 10 m and above, the colour of the HUD speed band (lime for slow and green, lemon, coral); below 10 m and with Help, the predicted touchdown. One rule, `markerBand` in `src/hud.ts`, used by `MoonScene.update` (new `SceneView.assist`, `SceneView.band`) and `updateEdges`. Low fuel: when `helperCanLand()`, the 30 s call-out is lemon ("Fuel star gone. You can still land." by hand, the old text with Help), and the fuel bar stays lemon (`HudView.fuelCalm`, `data-fuel-calm`). Test state `markerBand`. | DONE (not run) | `src/hud.ts`, `src/scene/moonScene.ts`, `src/main.ts`, `src/game.css` | `src/hud.test.ts` (2 new tests); `e2e/controls.spec.ts` (`markerBand` equals the marker colour of `vsBand` after the W release) |
+| 2 | R4 finding 2. Engine kick: a new W or stick press, or the slider moving up from still, shows the plume glow and the warm halo at 0.35 or more for 150 ms (at most 50 ms less per drawn frame), no shake. Test state `kickMs`. The time-based gentle start was built, then reverted: it failed (f) and (g) (asserts not changed). The F6 lever rule (`KEY_FINE_SHARE` 0.3, `KEY_FINE_SPAN` 0.45) stays. See DESIGN section 7. | DONE, deviation from R4 noted | `src/scene/moonScene.ts`, `src/main.ts` | `e2e/controls.spec.ts` (engine rise and kick within 3 frames); `src/input/mapping.test.ts` unchanged |
+| 3 | R4 finding 4. `controls.spec.ts`: an in-page frame log replaces the `throttle > 0` and `haloThrottle > 0` checks. Within the first 3 frames that apply W: the engine command (`cmdThrottle`) rises 0.005 or more over the throttle before W, and `kickMs > 0` or `haloThrottle >= 0.35`. `keyToFrameMs` ≤ 120 replaces `lastInputAgeMs < 150`. Notch step: after the W release the lever seats within 1 s of sim time, then for 1 s it stays within 0.01 of `hoverLever` and the speed changes by 0.3 m/s or less. Test state `keyToFrameMs`, `hoverLever`, `cmdThrottle`. | DONE (not run) | `e2e/controls.spec.ts`, `src/main.ts` | the spec itself |
+| 4 | DESIGN: section 3 (fuel bar and 30 s call-out rule), section 4 (knob names; the keys table is from before MP1), section 5 (marker colour rule), section 7 (time-based gentle start, engine kick), section 9 (kick is a visual aid), section 11 (MP1 tests and test state). | DONE | `docs/DESIGN.md` | none |
+
+### Risks and expected numbers
+
+- **(f) and (g), keys only (asserts not changed).** Measured: the time-based start failed (95-97 failed asserts). Sweep (failed asserts): time-flat 0.5/0.3, 0.6/0.3, 0.5/0.2: 95-97; linear ramp over 0.8/1.0/1.2 s: 99/29/51; lever rule span 0.1/0.15/0.2/0.3: 96/96/54/6 (0.45 passes); 3-stage mid share/span 0.5/0.3: 63, 0.4/0.35: 12, 0.5/0.4: 38, 0.6/0.45: 15, 0.4/0.45: 11, 0.35/0.4: 8, 0.4/0.3: 12, 0.35/0.35: 12, 0.35/0.45: 0. The only pass is a knife edge for about 0.2 s faster brake, so the F6 rule is kept. All 239 unit tests pass.
+- **e2e engine rise at 60 fps.** 3 frames at 60 fps from the notch give about +0.0128 lever, about +0.006 throttle: a small margin over 0.005. At 2 fps (software GL), the rise is about +0.025.
+- **e2e `keyToFrameMs` on a host without a GPU.** At about 2 fps a frame lasts about 500 ms, so the 120 ms check can fail there. It measures the game, not the IPC.
+
+### To do after the run
+
+- Run `pnpm typecheck`, `pnpm lint`, `pnpm test`. Copy the (f) and (g) keys tables into DESIGN section 4.
+- Run `pnpm build`, then `pnpm exec playwright test --config playwright.config.ts --project chromium controls.spec.ts`, then `pnpm ci:local`.
+- The marker colour and the low-fuel bar change in some frames, so screenshot baselines can change. Run `pnpm e2e:update` after a human checks the frames.

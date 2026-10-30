@@ -26,6 +26,14 @@ interface ControlsState {
   solo: boolean;
   rcsPuffs: number;
   haloThrottle: number;
+  altitude: number | null;
+  vsBand: 'slow' | 'good' | 'warn' | 'bad';
+  /** R4 findings 1, 2 and 4 (src/main.ts testState). */
+  markerBand: 'good' | 'warn' | 'bad' | null;
+  kickMs: number;
+  cmdThrottle: number;
+  hoverLever: number | null;
+  keyToFrameMs: number | null;
 }
 
 interface Snap {
@@ -72,6 +80,61 @@ async function afterFrames(page: Page, n: number): Promise<{ frames: number[]; s
     n,
   );
   return { frames, snap: await snap(page) };
+}
+
+/**
+ * Start an in-page log of the game state on every rendered frame (R4 finding 4). The game's own
+ * frame callback was queued first, so each entry is the state after that frame's update().
+ */
+async function startFrameLog(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __g499?: { state?: () => unknown }; __mtFrames?: unknown[] | null };
+    const log: unknown[] = [];
+    w.__mtFrames = log;
+    const tick = (): void => {
+      if (w.__mtFrames !== log) return;
+      log.push(w.__g499?.state ? w.__g499.state() : {});
+      if (log.length < 600) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+async function stopFrameLog(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    (window as unknown as { __mtFrames?: unknown[] | null }).__mtFrames = null;
+  });
+}
+
+/**
+ * The first n logged frames from the first one with `key` held (that frame's update() applied the
+ * key), and the frame before it. Waits until n such frames exist.
+ */
+async function framesFromKey(page: Page, key: string, n: number): Promise<{ prior: ControlsState | null; frames: ControlsState[] }> {
+  let out: { prior: ControlsState | null; frames: ControlsState[] } = { prior: null, frames: [] };
+  await expect
+    .poll(
+      async () => {
+        out = await page.evaluate(
+          ([k, count]) => {
+            const log = ((window as unknown as { __mtFrames?: unknown[] | null }).__mtFrames ?? []) as ControlsState[];
+            const i = log.findIndex((s) => Array.isArray(s.heldKeys) && s.heldKeys.includes(k));
+            if (i < 0) return { prior: null, frames: [] };
+            return { prior: i > 0 ? (log[i - 1] ?? null) : null, frames: log.slice(i, i + count) };
+          },
+          [key, n] as const,
+        );
+        return out.frames.length;
+      },
+      { timeout: 15_000, intervals: [50] },
+    )
+    .toBeGreaterThanOrEqual(n);
+  return out;
+}
+
+/** The marker colour that goes with a HUD speed band in manual flight up high (R4 finding 1). */
+function markerOf(band: ControlsState['vsBand']): 'good' | 'warn' | 'bad' {
+  return band === 'slow' ? 'good' : band;
 }
 
 /** Mean vertical acceleration (m/s^2) between two samples, by sim time. */
@@ -121,27 +184,40 @@ test.describe('moon-touchdown keyboard controls', () => {
     expect((await snap(page)).s.assist).toBe(true);
 
     // 3. Hold W: Help hands over on the key press itself.
+    // Help already burns about 16% here, so "throttle > 0" would pass without W (R4 finding 4): read
+    // the throttle before W, and log every rendered frame in the page (no Playwright IPC in the timing).
+    const before = (await snap(page)).s;
+    await startFrameLog(page);
     const t0 = Date.now();
     await page.keyboard.down('KeyW');
     const w0 = await snap(page);
     const wall = Date.now() - t0;
-    // The game-side age (key event to read-back, below) is the response check. The wall time also counts
-    // Playwright IPC, which is slow when all browser projects run in parallel, so it only guards against a hang.
-    expect(wall, 'key press and read-back did not hang').toBeLessThan(1000);
+    // MP1 item 3: the response checks are in-page only (keyToFrameMs and the frame log below). The wall
+    // time is Playwright IPC (over 1 s with 6 parallel workers), so it is logged, and only a real hang fails.
+    console.log(`keydown + read-back wall time, IPC included (ms): ${wall}`);
+    expect(wall, 'key press and read-back did not hang').toBeLessThan(10000);
     expect(w0.s.assist, 'Help off at once').toBe(false);
-    // The throttle is applied on the next animation frame after the key event (one frame, ~16 ms on a GPU;
-    // slower under software GL here), so wait 3 rendered frames instead of reading synchronously.
-    const { frames, snap: wfSnap } = await afterFrames(page, 3);
-    const wf = wfSnap.s;
-    testInfo.annotations.push({ type: 'frames-ms', description: frames.join(',') + ' throttle ' + wf.throttle });
-    console.log('frames after W (ms):', frames.join(','), 'throttle', wf.throttle, 'halo', wf.haloThrottle);
-    expect(wf.throttle, 'engine lit within 3 rendered frames of the key press').toBeGreaterThan(0);
-    // On the lander itself, high up: the halo turns warm and grows with the engine (R3 finding 1).
-    expect(wf.haloThrottle, 'the halo shows the engine within 3 rendered frames of W').toBeGreaterThan(0);
+    // The first 3 rendered frames that applied W. The sim steps at a fixed 60 Hz, so the check reads
+    // the engine command of each frame (cmdThrottle, what the next sim step uses).
+    const wLog = await framesFromKey(page, 'KeyW', 3);
+    await stopFrameLog(page);
+    const base = wLog.prior?.throttle ?? before.throttle;
+    const rise = Math.max(...wLog.frames.map((s) => s.cmdThrottle)) - base;
+    const kickSeen = wLog.frames.some((s) => s.kickMs > 0 || s.haloThrottle >= 0.35);
+    const wf = wLog.frames[wLog.frames.length - 1] as ControlsState;
+    testInfo.annotations.push({ type: 'w-frames', description: `rise ${rise.toFixed(4)} kick ${wLog.frames.map((s) => Math.round(s.kickMs)).join(',')}` });
+    console.log('3 frames after W: throttle rise', rise.toFixed(4), 'kick ms', wLog.frames.map((s) => s.kickMs).join(','), 'halo', wf.haloThrottle);
+    expect(rise, 'the engine rises by 0.005 or more within 3 rendered frames of W').toBeGreaterThanOrEqual(0.005);
+    // On the lander itself, high up: the engine kick shows the press on the plume glow and the halo (R4 finding 2).
+    expect(kickSeen, 'the engine kick (or a warm halo of 0.35 or more) within 3 rendered frames of W').toBe(true);
     // The toast is fully shown in test frames too (R3 finding 4).
     expect(await page.locator('#toast').evaluate((el) => getComputedStyle(el).opacity), 'toast opacity').toBe('1');
     expect(w0.s.lastInputSource).toBe('keyboard');
-    expect(w0.s.lastInputAgeMs ?? Infinity).toBeLessThan(150);
+    // Game-side latency: from the keydown handler to the first update() that applied the key.
+    await expect.poll(async () => (await snap(page)).s.keyToFrameMs, { timeout: 15_000, intervals: [50] }).not.toBeNull();
+    const keyMs = (await snap(page)).s.keyToFrameMs ?? Infinity;
+    console.log('keydown to the first update that applied W (ms):', keyMs.toFixed(1));
+    expect(keyMs, 'W is applied in the game 120 ms or less after the key event').toBeLessThanOrEqual(120);
     expect(w0.s.heldKeys).toContain('KeyW');
     expect(w0.s.litKeys, 'the W key cap lights').toContain('up');
     expect(w0.s.toast).toBe('You fly now');
@@ -154,6 +230,22 @@ test.describe('moon-touchdown keyboard controls', () => {
     expect(w1.lever, 'the lever ramps while W is held').toBeGreaterThan(w0.s.lever);
     expect(w1.throttle).toBeGreaterThan(0.1);
     await page.keyboard.up('KeyW');
+    const r0 = (await snap(page)).s;
+    // 3b. The hover notch (R4 finding 4): hands off, the lever slides back into the notch (about
+    // 0.2 s from full) and then the speed holds. The game runs in real time, so poll.
+    const notchGap = (s: ControlsState): number => (s.hoverLever === null ? Infinity : Math.abs(s.lever - s.hoverLever));
+    await expect.poll(async () => notchGap((await snap(page)).s), { timeout: 15_000, intervals: [50] }).toBeLessThanOrEqual(0.01);
+    const n0 = (await snap(page)).s;
+    expect(n0.time - r0.time, 'the lever reaches the notch within 1 s of letting go').toBeLessThanOrEqual(1);
+    const n1 = (await waitSim(page, n0, 1)).s;
+    console.log('notch: lever', n1.lever.toFixed(4), 'hover lever', n1.hoverLever, 'speed change over 1 s', (n1.vs - n0.vs).toFixed(3));
+    // Within 0.01 (LEVER_NOTCH_EPS); the notch drifts a hair per frame as fuel burns, hence the 1e-4.
+    expect(notchGap(n1), 'hands off: the lever stays in the hover notch').toBeLessThanOrEqual(0.01 + 1e-4);
+    expect(Math.abs(n1.vs - n0.vs), 'hands off: the speed holds within 0.3 m/s over 1 s').toBeLessThanOrEqual(0.3);
+    // R4 finding 1: in a correct manual descent up high the marker shows the HUD speed band, not "bumpy".
+    expect(n1.assist).toBe(false);
+    expect(n1.altitude ?? 0, 'still above the strict height').toBeGreaterThan(10);
+    expect(n1.markerBand, 'the marker colour follows the HUD speed band').toBe(markerOf(n1.vsBand));
     // The lander levels out (Help leaned against the drift).
     await page.waitForTimeout(500);
     const w2 = await snap(page);

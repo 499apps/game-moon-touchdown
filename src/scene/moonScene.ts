@@ -20,6 +20,7 @@
  * The scene never changes the sim: each frame it draws the state it is given.
  */
 import * as THREE from 'three';
+import { markerBand, type Band, type MarkerBand } from '../hud';
 import type { Rng } from '../kit/prng';
 import type { Tier } from '../kit/quality';
 import type { KitRenderer } from '../kit/renderer';
@@ -60,6 +61,15 @@ export interface SceneView {
   cmdTiltZ: number;
   /** A tilt key, the pad or a stick is held now: a chevron on the halo edge shows the command. */
   tiltHeld: boolean;
+  /** Help flies the engine. With `band`, it sets the marker colour (markerBand, R4 finding 1). */
+  assist: boolean;
+  /** The speed band the HUD shows now. */
+  band: Band;
+  /**
+   * Engine kick (R4 finding 2): a new "more engine" press in the last ENGINE_KICK_MS. The plume
+   * glow and the warm halo show at KICK_LEVEL or more, so a short tap from the notch is seen.
+   */
+  kick: boolean;
 }
 
 export interface MoonSceneOptions {
@@ -131,6 +141,13 @@ const HALO_WARM = new THREE.Color('#ffb066');
  * fixed size on screen (px across, low to full throttle). It fades out from `high` to `low` m.
  */
 const PLUME_GLOW = { drop: 3.2, minPx: 20, maxPx: 46, low: 25, high: 60 } as const;
+/**
+ * Engine kick (R4 finding 2), visual only: for ENGINE_KICK_MS after a new "more engine" press the
+ * plume glow and the warm halo show at KICK_LEVEL of full or more. The engine twin of the puffs.
+ * No camera shake, so it is the same with reduced motion.
+ */
+export const ENGINE_KICK_MS = 150;
+const KICK_LEVEL = 0.35;
 /** Tilt chevron on the halo edge: size and gap beyond the halo radius (px). */
 const CHEVRON = { px: 22, gap: 7 } as const;
 /** Ground glow under the lander starts at this height (m). */
@@ -144,10 +161,10 @@ const BEACON_FULL = 260;
 const MARKER_MIN_PX = 30;
 const MARKER_RADIUS = 3.3;
 
-const OUTCOME_COLOR = {
-  soft: new THREE.Color(palette.lime),
-  close: new THREE.Color(palette.lemon),
-  bumpy: new THREE.Color(palette.coral),
+const MARKER_COLOR: Readonly<Record<MarkerBand, THREE.Color>> = {
+  good: new THREE.Color(palette.lime),
+  warn: new THREE.Color(palette.lemon),
+  bad: new THREE.Color(palette.coral),
 };
 
 export class MoonScene {
@@ -409,7 +426,7 @@ export class MoonScene {
     scene.add(this.dust.points);
 
     this.markerMat = new THREE.MeshBasicMaterial({
-      color: OUTCOME_COLOR.soft,
+      color: MARKER_COLOR.good,
       transparent: true,
       opacity: 0.9,
       depthWrite: false,
@@ -594,7 +611,8 @@ export class MoonScene {
       // A length L at distance d spans L * H / (2 d tan(fov / 2)) px; the ring is 2 R across.
       const minScale = (MARKER_MIN_PX * far * Math.tan((cam.fov * DEG) / 2)) / (MARKER_RADIUS * this.viewHeight);
       this.marker.scale.setScalar(Math.max(1, minScale));
-      const col = p.outcome === 'soft' ? OUTCOME_COLOR.soft : p.vs < 4 ? OUTCOME_COLOR.close : OUTCOME_COLOR.bumpy;
+      // Manual flight up high: the HUD speed band; low down and with Help: the predicted touchdown.
+      const col = MARKER_COLOR[markerBand(p, { assist: v.assist, band: v.band, altitude: v.altitude })];
       this.markerMat.color.copy(col).multiplyScalar(1.4);
       const n = Math.min(TRAIL_MAX, p.trail.length);
       const stride = p.trail.length / n;
@@ -650,10 +668,11 @@ export class MoonScene {
   private updateHalo(v: SceneView): void {
     const on = v.phase === 'ready' || v.phase === 'flying';
     const k = on ? smoothstep(HALO_FADE.low, HALO_FADE.high, v.altitude) : 0;
-    // The engine on the halo: warm and bigger with the throttle high up, plain below 60 m.
+    // The engine on the halo: warm and bigger with the throttle high up, plain below 60 m. The
+    // engine kick of a new press shows at KICK_LEVEL or more.
     const thr =
       v.phase === 'flying' && !v.paused
-        ? clamp(v.throttle, 0, 1) * smoothstep(HALO_THROTTLE.low, HALO_THROTTLE.full, v.altitude)
+        ? this.engineShow(v) * smoothstep(HALO_THROTTLE.low, HALO_THROTTLE.full, v.altitude)
         : 0;
     this.haloK = k;
     this.halo.visible = k > 0.01;
@@ -666,6 +685,12 @@ export class MoonScene {
     this.halo.position.copy(this.lander.root.position);
     this.halo.position.y += 0.6;
     this.halo.scale.setScalar(this.pxScale(this.haloPx()));
+  }
+
+  /** The engine share (0..1) the halo and the plume glow show: the throttle, or KICK_LEVEL during a kick. */
+  private engineShow(v: SceneView): number {
+    const thr = clamp(v.throttle, 0, 1);
+    return v.kick ? Math.max(thr, KICK_LEVEL) : thr;
   }
 
   /** Halo size on screen (px): HALO_PX, up to HALO_THROTTLE.scale times with the engine high up. */
@@ -721,8 +746,9 @@ export class MoonScene {
 
     const root = this.lander.root;
     const s = v.lander;
-    // Plume glow: from above the real plume hides under the lander, so a warm glow peeks out.
-    const thr = v.phase === 'flying' && !v.paused ? clamp(v.throttle, 0, 1) : 0;
+    // Plume glow: from above the real plume hides under the lander, so a warm glow peeks out. A new
+    // press shows the engine kick (KICK_LEVEL or more) for ENGINE_KICK_MS.
+    const thr = v.phase === 'flying' && !v.paused ? this.engineShow(v) : 0;
     const w = smoothstep(PLUME_GLOW.low, PLUME_GLOW.high, v.altitude);
     this.plumeGlow.visible = thr > 0 && w > 0.01;
     if (this.plumeGlow.visible) {
