@@ -13,7 +13,8 @@ export const LEVER_OFF = 0.03;
 export const LEVER_CURVE = 2;
 /**
  * Lever units per second while a throttle key is held. With the first-press step below, W from
- * off reaches hover (lever about 0.3) in about 0.26 s and the top in about 1.1 s.
+ * off reaches hover (lever about 0.3) in about 0.26 s and the top in about 1.1 s. From the hover
+ * notch the first part of a press is gentler (KEY_FINE_SHARE below).
  */
 export const KEY_LEVER_RATE = 0.85;
 /**
@@ -23,6 +24,21 @@ export const KEY_LEVER_RATE = 0.85;
 export const KEY_START_LEVER = 0.08;
 /** Lever units per second at full gamepad stick or trigger. */
 export const PAD_LEVER_RATE = 0.8;
+/**
+ * Hover notch (F6). When the player lets go of the engine (key, stick or slider), the lever slides
+ * back into the hover notch at this rate (lever units per second), so the lander keeps its speed
+ * down instead of braking or falling on by itself. Full to hover takes about 0.18 s.
+ */
+export const LEVER_NOTCH_RATE = 4;
+/** The lever counts as in the notch within this distance (lever units); a tap there changes nothing. */
+export const LEVER_NOTCH_EPS = 0.01;
+/**
+ * A "more engine" press (key or stick) that starts in the notch ramps at this share of its rate
+ * for the first KEY_FINE_SPAN of lever above the notch: small corrections near hover stay small
+ * for a child who reacts late. A press from below the notch (engine off) keeps the full rate.
+ */
+export const KEY_FINE_SHARE = 0.3;
+export const KEY_FINE_SPAN = 0.45;
 /** Share of full tilt a held tilt key asks for. */
 export const KEY_TILT = 0.6;
 /** Tilt units per second (full deflection in a quarter second). */
@@ -188,6 +204,13 @@ export interface ShapedControls {
 /**
  * Turns intents into smooth, rate-limited controls. A new "more engine" rate (key or stick) with
  * the lever below KEY_START_LEVER steps it there first, so the engine answers on the same frame.
+ *
+ * Hover notch (F6), only while the page tells the shaper where hover is (setHoverLever):
+ * - after the player's own engine input ends (key up, stick back, thumb off the slider), the
+ *   lever slides into the notch, so "hands off" means "keep this speed";
+ * - a "more engine" press that starts in the notch ramps gently at first (KEY_FINE_SHARE);
+ * - setLever (Help hands the engine back) and reset leave the lever where it is until the player
+ *   moves the engine.
  */
 export class ControlShaper {
   private lever = 0;
@@ -195,14 +218,35 @@ export class ControlShaper {
   private tz = 0;
   /** A "more engine" rate was asked in the last update (to find a new press). */
   private wasUp = false;
+  /** Hover lever (the notch), or null when unknown (no notch, no fine ramp). */
+  private notch: number | null = null;
+  /** The player moved the lever since the last setLever or reset (the notch may pull). */
+  private played = false;
+  /** The gentle ramp of the current press lasts below this lever (-1 = no gentle ramp). */
+  private fineUntil = -1;
+  /** The lever reached the notch by itself; a small notch drift (fuel burn) then leaves it put. */
+  private seated = false;
 
   get leverPosition(): number {
     return this.lever;
   }
 
+  /** Where the hover notch is now (lever units), or null for no notch. */
+  get hoverLever(): number | null {
+    return this.notch;
+  }
+
   /** Set the lever (new run, or the assist hands control back at its current throttle). */
   setLever(v: number): void {
     this.lever = clampN(Number.isFinite(v) ? v : 0, 0, 1);
+    this.played = false;
+    this.seated = false;
+    this.fineUntil = -1;
+  }
+
+  /** The hover notch for this frame (the lever that gives hover throttle), or null for none. */
+  setHoverLever(v: number | null): void {
+    this.notch = v === null || !Number.isFinite(v) ? null : clampN(v, 0, 1);
   }
 
   reset(lever = 0): void {
@@ -214,10 +258,29 @@ export class ControlShaper {
 
   update(intent: Intent, dt: number): ShapedControls {
     const up = intent.lever === null && intent.leverRate > 0;
+    const engine = intent.lever !== null || intent.leverRate !== 0;
+    const notch = this.notch;
+    const before = this.lever;
     if (intent.lever !== null) this.lever = clampN(intent.lever, 0, 1);
-    else {
-      if (up && !this.wasUp && this.lever < KEY_START_LEVER) this.lever = KEY_START_LEVER;
-      this.lever = clampN(this.lever + intent.leverRate * dt, 0, 1);
+    else if (intent.leverRate !== 0) {
+      if (up && !this.wasUp) {
+        const inNotch = notch !== null && Math.abs(this.lever - notch) <= LEVER_NOTCH_EPS;
+        this.fineUntil = inNotch && notch !== null ? notch + KEY_FINE_SPAN : -1;
+        if (this.lever < KEY_START_LEVER) this.lever = KEY_START_LEVER;
+      }
+      const rate = up && this.lever < this.fineUntil ? intent.leverRate * KEY_FINE_SHARE : intent.leverRate;
+      this.lever = clampN(this.lever + rate * dt, 0, 1);
+    } else if (this.played && notch !== null && this.lever !== notch && !(this.seated && Math.abs(this.lever - notch) <= LEVER_NOTCH_EPS)) {
+      // Hands off: slide into the hover notch and stop exactly on it, never past it.
+      const gap = notch - this.lever;
+      const reach = LEVER_NOTCH_RATE * Math.max(0, dt);
+      this.lever = Math.abs(gap) <= reach ? notch : this.lever + Math.sign(gap) * reach;
+      if (this.lever === notch) this.seated = true;
+    }
+    // Only input that moved the lever arms the notch: a tap (the slider is relative) changes nothing.
+    if (engine && this.lever !== before) {
+      this.played = true;
+      this.seated = false;
     }
     this.wasUp = up;
     const slew = Math.max(TILT_SLEW, intent.tiltSlew ?? TILT_SLEW);

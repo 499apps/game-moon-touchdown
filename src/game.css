@@ -39,6 +39,7 @@
 /* ---------- HUD ---------- */
 
 .mt-hud {
+  --mt-slow: var(--g499-sky);
   --mt-good: var(--g499-lime);
   --mt-warn: var(--g499-lemon);
   --mt-bad: var(--g499-coral);
@@ -118,6 +119,12 @@
   opacity: 0.7;
 }
 
+/* Slow (manual flight up high, F6): calm pale blue, never red. The bar zone is striped too. */
+.mt-gauge[data-band='slow'] .mt-num,
+.mt-gauge[data-band='slow'] .mt-gauge-icon {
+  color: var(--mt-slow);
+}
+
 .mt-gauge[data-band='good'] .mt-num,
 .mt-gauge[data-band='good'] .mt-gauge-icon {
   color: var(--mt-good);
@@ -134,21 +141,32 @@
 }
 
 /*
- * Speed down. Green reaches the safe speed for the height (src/hud.ts sets --mt-vs-green), yellow
- * ends at the middle, red is the right half. Near the ground: green 0-2, yellow 2-4, red 4-8 m/s.
+ * Speed down: a zone gauge (src/hud.ts vsBarPos). Manual flight above 10 m: a striped pale-blue
+ * slow zone (0 to --mt-vs-slow), green to --mt-vs-green, yellow to the middle, red the right half.
+ * Helper flight and the last 10 m have no slow zone (--mt-vs-slow is 0%): green starts at 0.
+ * The stripes make the slow zone readable without colour.
  */
 .mt-vs-bar {
-  --mt-vs-green: 25%;
+  --mt-vs-slow: 0%;
+  --mt-vs-green: 34%;
   position: relative;
   width: 92px;
   height: 12px;
   border-radius: 6px;
-  background: linear-gradient(
-    90deg,
-    var(--g499-lime) 0 var(--mt-vs-green),
-    var(--g499-lemon) var(--mt-vs-green) 50%,
-    var(--g499-coral) 50% 100%
-  );
+  background:
+    repeating-linear-gradient(
+        135deg,
+        rgba(10, 12, 32, 0.42) 0 2px,
+        transparent 2px 5px
+      )
+      0 0 / var(--mt-vs-slow) 100% no-repeat,
+    linear-gradient(
+      90deg,
+      var(--mt-slow, var(--g499-sky)) 0 var(--mt-vs-slow),
+      var(--g499-lime) var(--mt-vs-slow) var(--mt-vs-green),
+      var(--g499-lemon) var(--mt-vs-green) 50%,
+      var(--g499-coral) 50% 100%
+    );
   opacity: 0.9;
 }
 
@@ -462,6 +480,17 @@
 
 .mt-callout[data-band='bad'] {
   color: var(--g499-coral);
+}
+
+/* A gentle tip, not a warning (F6 "A bit faster saves fuel"): white text, calm pale-blue ring. */
+.mt-callout[data-band='tip'] {
+  color: var(--g499-white);
+  box-shadow: 0 0 0 3px var(--g499-sky);
+  font-weight: 700;
+}
+
+.mt-callout[data-band='tip'] .mt-callout-icon {
+  color: var(--g499-sky);
 }
 
 .mt-callout-icon,

@@ -6,7 +6,8 @@ It plays at `https://499apps.com/games/moon-touchdown/`.
 - Pick one of six real sites. They go from the flat Sea of Tranquility to the deep valley at Taurus-Littrow and the winding Hadley Rille.
 - The ground is real: LRO LOLA laser altimeter heights, at true scale.
 - Use the engine and tilt to slow down and stop the sideways drift. Touch down under 2 m/s.
-- The speed-down gauge follows the height: fast is fine high up, slow near the ground. When you fly by hand, yellow means "fast but you can still stop" and red means "brake now".
+- The speed-down gauge follows the height: fast is fine high up, slow near the ground. Keep the mark in the middle of the green. When you fly by hand, yellow means "fast but you can still stop" and red means "brake now". Up high, a striped pale-blue "slow" part sits left of the green: falling much slower than Help hovers away the fuel, so after 4 s there a calm tip says "A bit faster saves fuel". Near the ground (below 10 m), slow is good.
+- Let go of the engine (W / S, the slider or the stick) and it slides back to the hover point, so the lander keeps its speed down.
 - Edge arrows point to the target ring and to the predicted touchdown when they are out of view.
 - Fuel counts in seconds of hovering. Chimes sound at 60 s and 30 s. The first crew heard the "30 seconds" fuel call just before they touched down.
 - Get up to three stars: a soft touchdown, inside the green ring, and 30 s of fuel left (the star tick on the fuel bar). Help always lands safely but uses too much fuel for the fuel star. To earn it, fly the engine yourself: fall fast in the yellow up high, then brake hard before the red. A soft touchdown opens the next site.
@@ -29,7 +30,7 @@ It plays at `https://499apps.com/games/moon-touchdown/`.
 
 | Action | Touch | Keyboard | Gamepad |
 | --- | --- | --- | --- |
-| Engine up and down | Drag the left slider up or down (a tap changes nothing) | W / S | Left stick up and down, or RT / LT |
+| Engine up and down | Drag the left slider up or down (a tap changes nothing; lift the thumb and it slides back to hover) | W / S (let go: back to hover) | Left stick up and down, or RT / LT |
 | Tilt (lean the lander) | Drag on the right pad | Arrow keys or I J K L (A / D and E / Q also work) | Right stick |
 | Help (hover helper) on or off | Big round "Help" button | Space | A |
 | Start | Go button, or any engine or tilt input | Space (starts with Help on) | A |

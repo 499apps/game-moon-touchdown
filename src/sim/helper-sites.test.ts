@@ -17,16 +17,28 @@
  * (e) Game feel proxy: a noisy, slow-to-react novice (0.4 s delay, +-15% lever noise) who takes
  *     over from Help at 150 m lands softly in 80% or more of 20 seeds on every site.
  * (f) Real-input novices (R3 finding 2): a bang-bang W/S pilot through ControlShaper (the real
- *     key lever rate and first-press step) and a slider pilot with relative 10% steps, 0.4 s
- *     reaction, take over from Help at 300 m and at 150 m: 80% or more soft on every site. They
- *     tap Help when the game shows "Low fuel: tap Help"; the table shows how many landed by hand.
+ *     key lever rate, first-press step and hover notch) and a slider pilot with relative 10%
+ *     steps, 0.4 s reaction, take over from Help at 300 m and at 150 m: 80% or more soft on every
+ *     site. They tap Help when the game shows "Low fuel: tap Help"; 60% or more must land by hand.
+ * (g) The same novices WITHOUT the prompt (F6): a child who keeps flying by hand. 80% or more
+ *     soft by hand on every site and takeover height, and never out of fuel on sites 1-3.
  *
  * Every block prints a console.table before it asserts, so the measured numbers show even when a
  * check fails. Use them to re-tune SITES[].fuel.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createRng } from '../kit/prng';
-import { VS_STRICT_HEIGHT, vsBand, vsEnvelope, vsLimits, type VsMode } from '../hud';
+import {
+  VS_CLIMB,
+  VS_STRICT_HEIGHT,
+  speedBand,
+  vsBand,
+  vsEnvelope,
+  vsGreenMiddle,
+  vsLimits,
+  type Band,
+  type VsMode,
+} from '../hud';
 import {
   ControlShaper,
   emptyIntent,
@@ -154,8 +166,8 @@ function readHud(f: Flight): HudReadout {
 /** The HUD bands of a manual flight. */
 const manualMode = (hud: HudReadout): VsMode => ({ assist: false, hoverThrottle: hud.hoverThrottle });
 
-/** The speed band the HUD shows now (climbing is always green). */
-function hudBand(hud: HudReadout): 'good' | 'warn' | 'bad' {
+/** The speed band the HUD shows now (climbing counts as green here: only red steps are counted). */
+function hudBand(hud: HudReadout): Band {
   if (hud.vy > 0.05) return 'good';
   return vsBand(Math.max(0, -hud.vy), Math.max(0, hud.altitude), manualMode(hud));
 }
@@ -395,15 +407,20 @@ function flyNovice(terrain: Terrain, site: SiteInfo, seed: number): { run: RunSu
 }
 
 /**
- * Real-input novices (R3 finding 2): the same path as the game (src/main.ts). Help flies down to
- * the takeover height and hands the engine over at its own throttle (setAssist: no jump). Then the
- * child reads the HUD 0.4 s late and moves only the engine (no steering):
- * - keys: holds W while the speed mark is past the green band (too fast), until the mark crosses
- *   the middle of the green band; holds S while the lander climbs, until the mark is back at the
- *   middle. The keys go through mapKeyboard and ControlShaper.update, so the first-press step and
- *   KEY_LEVER_RATE are the real ones;
- * - slider: the same rule, one relative drag of 10% lever per look (every 0.4 s);
- * - both tap Help when the game shows "Low fuel: tap Help" (the real prompt), and Help lands.
+ * Real-input novices (R3 finding 2, F6): the same path as the game (src/main.ts). Help flies down
+ * to the takeover height and hands the engine over at its own throttle (setAssist: no jump). Then
+ * the child reads the HUD 0.4 s late and moves only the engine (no steering). The child aims the
+ * speed mark at the middle of the green band (vsLimits: in manual flight up high green starts at
+ * the slow zone):
+ * - keys: holds W while the mark is past the green band (too fast), until the mark crosses the
+ *   middle of green; holds S while the mark is in the slow zone or the lander climbs, until the
+ *   mark is back at the middle. The keys go through mapKeyboard and ControlShaper.update, so the
+ *   first-press step, KEY_LEVER_RATE and the hover notch are the real ones;
+ * - slider: the same rule, one relative drag of 10% lever per look (every 0.4 s). The thumb stays
+ *   on the slider while the child corrects and lifts when the mark is back at the middle (a lift
+ *   lets the lever slide into the hover notch, as in the game);
+ * - (f) both tap Help when the game shows "Low fuel: tap Help" (the real prompt), and Help lands;
+ *   (g) with ignorePrompt they keep flying by hand to the ground.
  */
 const REAL = {
   reaction: 0.4,
@@ -411,9 +428,16 @@ const REAL = {
   sliderStep: 0.1,
   seeds: 12,
   passShare: 0.8,
+  /** (f): share of runs that land softly by hand, without Help after the prompt. */
+  byHandShare: 0.6,
 } as const;
 
 type RealKind = 'keys' | 'slider';
+
+interface RealOptions {
+  /** (g) The child does not tap Help at the low-fuel prompt and keeps flying by hand. */
+  ignorePrompt?: boolean;
+}
 
 interface RealRun {
   run: RunSummary;
@@ -421,11 +445,22 @@ interface RealRun {
   takeoverFuel: number;
   /** The child tapped Help at the low-fuel prompt (Help flew the rest). */
   tookHelp: boolean;
+  /** The game showed "Low fuel: tap Help" during the manual flight (seen or not). */
+  promptShown: boolean;
+  /** Seconds of manual flight with the speed mark in the slow zone. */
+  slowSeconds: number;
   /** New key presses or slider drags. */
   actions: number;
 }
 
-function flyRealNovice(terrain: Terrain, site: SiteInfo, seed: number, kind: RealKind, takeover: number): RealRun {
+function flyRealNovice(
+  terrain: Terrain,
+  site: SiteInfo,
+  seed: number,
+  kind: RealKind,
+  takeover: number,
+  opts: RealOptions = {},
+): RealRun {
   const f = new Flight(terrain, startConditions(site, createRng(seed), terrain));
   const events: FlightEvent[] = [];
   const help: PilotInput = { ...IDLE_INPUT, assist: true };
@@ -440,11 +475,15 @@ function flyRealNovice(terrain: Terrain, site: SiteInfo, seed: number, kind: Rea
   let look = 0;
   let actions = 0;
   let tookHelp = false;
+  let promptShown = false;
+  let slowSeconds = 0;
   while (f.phase === 'flying' && f.tick < MAX_TICKS) {
-    seen.push({ hud: readHud(f), prompt: promptNow(f).prompt });
+    const shownNow = promptNow(f).prompt;
+    if (shownNow === 'help') promptShown = true;
+    seen.push({ hud: readHud(f), prompt: shownNow });
     if (seen.length > lag + 1) seen.shift();
     const view = seen[0] as { hud: HudReadout; prompt: LowFuelPrompt };
-    if (view.prompt === 'help') {
+    if (view.prompt === 'help' && !opts.ignorePrompt) {
       tookHelp = true;
       break;
     }
@@ -452,13 +491,14 @@ function flyRealNovice(terrain: Terrain, site: SiteInfo, seed: number, kind: Rea
     const h = Math.max(0, hud.altitude);
     const down = -hud.vy;
     const lim = vsLimits(h, manualMode(hud));
-    const mid = lim.green / 2;
-    const climbing = hud.vy > 0.05;
+    const mid = vsGreenMiddle(lim);
+    const climbing = hud.vy > VS_CLIMB;
+    const slow = climbing || (lim.slow > 0 && down < lim.slow);
     if (dir > 0 && down <= mid) dir = 0;
     if (dir < 0 && down >= mid) dir = 0;
     if (dir === 0) {
       if (down >= lim.green) dir = 1;
-      else if (climbing) dir = -1;
+      else if (slow) dir = -1;
       if (dir !== 0 && kind === 'keys') actions++;
     }
     let intent: Intent;
@@ -467,43 +507,61 @@ function flyRealNovice(terrain: Terrain, site: SiteInfo, seed: number, kind: Rea
     } else {
       intent = emptyIntent();
       look -= DT;
-      if (dir !== 0 && look <= 0) {
-        intent.lever = clamp(shaper.leverPosition + REAL.sliderStep * dir, 0, 1);
-        look = REAL.reaction;
-        actions++;
+      if (dir !== 0) {
+        // The thumb rests on the slider while the child corrects; one drag per look.
+        intent.lever = shaper.leverPosition;
+        if (look <= 0) {
+          intent.lever = clamp(shaper.leverPosition + REAL.sliderStep * dir, 0, 1);
+          look = REAL.reaction;
+          actions++;
+        }
       }
     }
+    // The same hover notch as the page (src/main.ts sets it every frame).
+    shaper.setHoverLever(throttleToLever(hoverThrottle(f.state)));
     const c = shaper.update(intent, DT);
+    if (speedBand(f.state.vel.y, f.altitude, manualMode(readHud(f))) === 'slow') slowSeconds += DT;
     events.push(...f.step({ throttle: c.throttle, tiltX: c.tiltX, tiltZ: c.tiltZ, tiltActive: c.tiltActive, assist: false }));
   }
   // Help after the prompt: the same flight, Help on (a fresh engagement, as in the game).
   while (tookHelp && f.phase === 'flying' && f.tick < MAX_TICKS) events.push(...f.step(help));
-  return { run: summarize(seed, f, events), takeover, takeoverFuel, tookHelp, actions };
+  return { run: summarize(seed, f, events), takeover, takeoverFuel, tookHelp, promptShown, slowSeconds, actions };
 }
 
-function realNoviceTable(kind: RealKind): { site: SiteInfo; takeover: number; runs: RealRun[] }[] {
-  const out: { site: SiteInfo; takeover: number; runs: RealRun[] }[] = [];
-  for (const site of SITES) {
+interface RealRow {
+  site: SiteInfo;
+  index: number;
+  takeover: number;
+  runs: RealRun[];
+}
+
+function realNoviceTable(kind: RealKind, opts: RealOptions = {}): RealRow[] {
+  const out: RealRow[] = [];
+  SITES.forEach((site, index) => {
     const terrain = terrainOf(site);
     for (const takeover of REAL.takeovers) {
       const runs: RealRun[] = [];
-      for (let seed = 1; seed <= REAL.seeds; seed++) runs.push(flyRealNovice(terrain, site, seed, kind, takeover));
-      out.push({ site, takeover, runs });
+      for (let seed = 1; seed <= REAL.seeds; seed++) runs.push(flyRealNovice(terrain, site, seed, kind, takeover, opts));
+      out.push({ site, index, takeover, runs });
     }
-  }
+  });
   console.table(
     out.map(({ site, takeover, runs }) => {
       const soft = runs.filter((r) => r.run.soft).length;
       return {
-        pilot: kind,
+        pilot: opts.ignorePrompt ? `${kind}, no Help` : kind,
         site: site.slug,
         'takeover (m)': takeover,
         soft: `${soft}/${runs.length}`,
         'by hand': runs.filter((r) => r.run.soft && !r.tookHelp).length,
         'Help at prompt': runs.filter((r) => r.tookHelp).length,
+        'prompt shown': runs.filter((r) => r.promptShown).length,
         'ran dry': runs.filter((r) => r.run.fuelOut).length,
         'fuel at takeover min (s)': lo(runs.map((r) => r.takeoverFuel)),
+        'left min (s)': lo(runs.map((r) => r.run.fuelLeft)),
         'left median (s)': round1(median(runs.map((r) => r.run.fuelLeft))),
+        'slow median (s)': round1(median(runs.map((r) => r.slowSeconds))),
+        'time median (s)': round1(median(runs.map((r) => r.run.time))),
         'actions median': median(runs.map((r) => r.actions)),
         bumps: runs
           .filter((r) => !r.run.soft)
@@ -828,9 +886,28 @@ describe('fuel budget on the real terrain of every site', () => {
     it(`(f) a real-input ${kind} novice (0.4 s reaction) who takes over at 300 m and 150 m lands softly on every site`, () => {
       for (const { site, takeover, runs } of realNoviceTable(kind)) {
         const soft = runs.filter((r) => r.run.soft).length;
+        const byHand = runs.filter((r) => r.run.soft && !r.tookHelp).length;
         expect
           .soft(soft / runs.length, `${kind} novice, ${site.slug}, takeover at ${takeover} m: soft share`)
           .toBeGreaterThanOrEqual(REAL.passShare);
+        // F6: the HUD teaches a way to fly that lands by hand, not only "tap Help in the end".
+        expect
+          .soft(byHand / runs.length, `${kind} novice, ${site.slug}, takeover at ${takeover} m: soft by hand share`)
+          .toBeGreaterThanOrEqual(REAL.byHandShare);
+      }
+    }, 240_000);
+  }
+
+  for (const kind of ['keys', 'slider'] as const) {
+    it(`(g) a real-input ${kind} novice who ignores the Help prompt and keeps flying lands softly by hand`, () => {
+      for (const { site, index, takeover, runs } of realNoviceTable(kind, { ignorePrompt: true })) {
+        const tag = `${kind} novice without Help, ${site.slug}, takeover at ${takeover} m`;
+        const soft = runs.filter((r) => r.run.soft && !r.tookHelp).length;
+        expect.soft(soft / runs.length, `${tag}: soft by hand share`).toBeGreaterThanOrEqual(REAL.passShare);
+        expect.soft(runs.filter((r) => r.tookHelp).length, `${tag}: never takes Help`).toBe(0);
+        if (index < 3) {
+          for (const r of runs) expect.soft(r.run.fuelOut, `${tag}, seed ${r.run.seed}: out of fuel`).toBe(false);
+        }
       }
     }, 240_000);
   }

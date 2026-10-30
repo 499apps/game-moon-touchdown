@@ -21,7 +21,7 @@ import { createStage } from './kit/stage';
 import { readTestMode } from './kit/test-mode';
 import { EdgeArrow, arrowInsets, placeEdge, type Insets } from './edgeArrows';
 import { drawDescentChart } from './graphs';
-import { Hud, vsLimits } from './hud';
+import { Hud, SLOW_CUE_TEXT, SlowCue, speedBand, vsLimits, type Band } from './hud';
 import { moonIcon, type MoonIcon } from './icons';
 import {
   TOAST_TEXT,
@@ -242,6 +242,10 @@ let helpOffInFlight = false;
 /** Seconds the toast stays, and the toast on screen. */
 let toastLeft = 0;
 let toastNow: Toast = null;
+/** The speed band the HUD shows now, and the gentle "A bit faster saves fuel" cue (F6). */
+let vsBandNow: Band = 'good';
+const slowCue = new SlowCue();
+let slowCues = 0;
 const sources = new Map<string, TerrainSource>();
 const shaper = new ControlShaper();
 const keys = new HeldKeys({
@@ -408,6 +412,9 @@ function prepareRun(site: SiteInfo, src: TerrainSource): void {
   fuelOutHelped = false;
   manualIdle = 0;
   helpOffInFlight = false;
+  slowCue.reset();
+  slowCues = 0;
+  vsBandNow = 'good';
   // New players: Help is armed on the ready screen (no toast yet), so the chip, the Help button
   // and the tip ("Help is on, slide to take over") agree. Engine input at ready still flies by
   // hand: the flight starts and Help hands the engine over on that frame ("You fly now").
@@ -600,7 +607,7 @@ function onTouchdown(r: FlightResult): void {
 
 function showCallout(
   text: string,
-  band: 'warn' | 'bad',
+  band: 'tip' | 'warn' | 'bad',
   opts: { icon?: MoonIcon; prompt?: boolean; key?: string; parts?: readonly (string | { key: string })[] } = {},
 ): void {
   calloutEl.textContent = '';
@@ -669,6 +676,21 @@ function updateLowFuelPrompt(f: Flight): void {
     promptShown = 'brake';
     if (touchOn) showCallout('Brake now: slide up', 'warn', { icon: 'slideUp', prompt: true });
     else showCallout('Brake now: hold', 'warn', { icon: 'slideUp', prompt: true, key: 'W' });
+  }
+}
+
+/**
+ * The gentle slow-zone cue (F6): after 4 s with the speed mark in the slow zone of a manual
+ * flight, a calm "A bit faster saves fuel" (a tip, no sound). Never while Help flies, and never
+ * over a low-fuel prompt or the key hint: fuel advice goes first.
+ */
+function updateSlowCue(f: Flight, dt: number): void {
+  const s = f.state;
+  vsBandNow = speedBand(s.vel.y, f.altitude, { assist, hoverThrottle: hoverThrottle(s) });
+  const manual = phase === 'flying' && !paused && !assist && f.fuelSeconds > 0;
+  if (slowCue.update(dt, { band: vsBandNow, manual, free: calloutEl.hidden && promptNow === null })) {
+    slowCues++;
+    showCallout(SLOW_CUE_TEXT, 'tip', { icon: 'down' });
   }
 }
 
@@ -937,6 +959,8 @@ function update(dt: number): void {
       edgeRing.pulse(true);
       tiltPadEl.classList.add('is-pulse');
     }
+    // The hover notch: when the player lets go of the engine, the lever slides back to hover (F6).
+    shaper.setHoverLever(throttleToLever(hoverThrottle(f.state)));
     const c = shaper.update(intent, dt);
     lastInput = { throttle: c.throttle, tiltX: c.tiltX, tiltZ: c.tiltZ, tiltActive: c.tiltActive, assist };
     stepCarry += dt;
@@ -945,6 +969,7 @@ function update(dt: number): void {
       handleEvents(f.step(lastInput));
     }
     updateLowFuelPrompt(f);
+    updateSlowCue(f, dt);
     if (phase === 'flying') {
       predictClock += dt;
       if (predictClock >= PREDICT_EVERY - 1e-9) {
@@ -1355,6 +1380,10 @@ function testState(): Record<string, unknown> {
     posX: f ? f.state.pos.x : 0,
     toast: toastNow ? TOAST_TEXT[toastNow] : null,
     keyHintShown,
+    // F6: the speed band the HUD shows ('slow' | 'good' | 'warn' | 'bad') and how many
+    // "A bit faster saves fuel" cues showed in this run.
+    vsBand: vsBandNow,
+    slowCues,
     // Visible answers on the lander itself (R3 finding 1): attitude-thruster puffs alive now, and
     // the engine's share (0..1) in the halo tint and size high up.
     rcsPuffs: scene ? scene.rcsPuffs : 0,

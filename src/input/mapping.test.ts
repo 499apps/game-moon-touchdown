@@ -3,8 +3,12 @@ import fc from 'fast-check';
 import { MAX_TILT } from '../sim/constants';
 import {
   ControlShaper,
+  KEY_FINE_SHARE,
+  KEY_FINE_SPAN,
   KEY_LEVER_RATE,
   KEY_START_LEVER,
+  LEVER_NOTCH_EPS,
+  LEVER_NOTCH_RATE,
   KEY_TILT,
   KEY_TILT_SLEW,
   LEVER_OFF,
@@ -213,5 +217,122 @@ describe('control shaper', () => {
     const s = new ControlShaper();
     s.setLever(throttleToLever(0.19));
     expect(s.update(emptyIntent(), 1 / 60).throttle).toBeCloseTo(0.19, 9);
+  });
+});
+
+describe('hover notch (F6)', () => {
+  const dt = 1 / 60;
+  const hover = throttleToLever(0.16);
+  const w = () => mapKeyboard(new Set(['KeyW']));
+  const sKey = () => mapKeyboard(new Set(['KeyS']));
+  const notched = (lever = hover): ControlShaper => {
+    const s = new ControlShaper();
+    s.setHoverLever(hover);
+    s.setLever(lever);
+    return s;
+  };
+  const hold = (s: ControlShaper, intent: () => ReturnType<typeof emptyIntent>, seconds: number) => {
+    let out = s.update(intent(), dt);
+    for (let t = dt; t < seconds - 1e-9; t += dt) out = s.update(intent(), dt);
+    return out;
+  };
+
+  it('letting go of W slides the lever back into the notch and holds it there', () => {
+    const s = notched();
+    hold(s, w, 0.8);
+    expect(s.leverPosition).toBeGreaterThan(hover + 0.2);
+    // Full to hover at LEVER_NOTCH_RATE takes well under 0.3 s.
+    hold(s, emptyIntent, 0.3);
+    expect(s.leverPosition).toBe(hover);
+    hold(s, emptyIntent, 2);
+    expect(s.leverPosition).toBe(hover);
+    expect(LEVER_NOTCH_RATE * 0.3).toBeGreaterThan(1 - hover);
+  });
+
+  it('letting go of S (engine off) relights at hover', () => {
+    const s = notched();
+    const off = hold(s, sKey, 0.6);
+    expect(off.throttle).toBe(0);
+    hold(s, emptyIntent, 0.2);
+    expect(s.leverPosition).toBe(hover);
+    expect(s.update(emptyIntent(), dt).throttle).toBeCloseTo(0.16, 9);
+  });
+
+  it('the slider holds while the thumb is down and slides into the notch when it lifts', () => {
+    const s = notched();
+    for (let i = 0; i < 30; i++) s.update({ ...emptyIntent(), lever: 0.7 }, dt);
+    expect(s.leverPosition).toBe(0.7);
+    hold(s, emptyIntent, 0.3);
+    expect(s.leverPosition).toBe(hover);
+  });
+
+  it('a tap in the notch changes nothing (the slider stays relative)', () => {
+    const s = notched();
+    hold(s, w, 0.2);
+    hold(s, emptyIntent, 0.5);
+    const before = s.leverPosition;
+    // The notch moves a hair as fuel burns; inside LEVER_NOTCH_EPS the lever stays put.
+    s.setHoverLever(hover - LEVER_NOTCH_EPS / 2);
+    s.update({ ...emptyIntent(), lever: before }, dt);
+    s.update(emptyIntent(), dt);
+    s.update(emptyIntent(), dt);
+    expect(s.leverPosition).toBe(before);
+  });
+
+  it('Help handing the engine back (setLever) does not pull the lever to the notch', () => {
+    const s = notched(throttleToLever(0.3));
+    hold(s, emptyIntent, 1);
+    expect(s.leverPosition).toBeCloseTo(throttleToLever(0.3), 12);
+    // A tap on the slider there (no drag) changes nothing either.
+    const at = s.leverPosition;
+    s.update({ ...emptyIntent(), lever: at }, dt);
+    hold(s, emptyIntent, 1);
+    expect(s.leverPosition).toBe(at);
+  });
+
+  it('W from the notch starts gently, then ramps at the full rate; W from off is unchanged', () => {
+    const s = notched();
+    const first = s.update(w(), dt);
+    expect(first.lever - hover).toBeCloseTo(KEY_LEVER_RATE * KEY_FINE_SHARE * dt, 12);
+    expect(first.throttle).toBeGreaterThan(0.16);
+    hold(s, w, KEY_FINE_SPAN / (KEY_LEVER_RATE * KEY_FINE_SHARE) + 0.05);
+    const a = s.leverPosition;
+    const b = s.update(w(), dt).lever;
+    expect(a).toBeGreaterThan(hover + KEY_FINE_SPAN - 1e-9);
+    if (b < 1) expect(b - a).toBeCloseTo(KEY_LEVER_RATE * dt, 12);
+    // From off: the first-press step and the full rate, the same as without a notch.
+    const off = notched(0);
+    const o1 = off.update(w(), dt);
+    expect(o1.lever).toBeCloseTo(KEY_START_LEVER + KEY_LEVER_RATE * dt, 12);
+    const o2 = off.update(w(), dt);
+    expect(o2.lever - o1.lever).toBeCloseTo(KEY_LEVER_RATE * dt, 12);
+  });
+
+  it('the notch return never overshoots and keeps the lever in 0..1 (property)', () => {
+    const step = fc.oneof(
+      fc.constant<'w' | 's' | 'none'>('none'),
+      fc.constant<'w' | 's' | 'none'>('w'),
+      fc.constant<'w' | 's' | 'none'>('s'),
+    );
+    fc.assert(
+      fc.property(fc.double({ min: 0.2, max: 0.4, noNaN: true }), fc.array(step, { maxLength: 300 }), (hv, steps) => {
+        const s = new ControlShaper();
+        s.setHoverLever(hv);
+        for (const k of steps) {
+          const before = s.leverPosition;
+          const o = s.update(k === 'w' ? w() : k === 's' ? sKey() : emptyIntent(), dt);
+          if (o.lever < 0 || o.lever > 1 || o.throttle !== leverToThrottle(o.lever)) return false;
+          // Hands off: the lever moves toward the notch only, by at most the notch rate.
+          if (k === 'none') {
+            const gapBefore = Math.abs(before - hv);
+            const gapAfter = Math.abs(o.lever - hv);
+            if (gapAfter > gapBefore + 1e-12) return false;
+            if (Math.abs(o.lever - before) > LEVER_NOTCH_RATE * dt + 1e-12) return false;
+            if (Math.sign(before - hv) !== 0 && Math.sign(o.lever - hv) === -Math.sign(before - hv)) return false;
+          }
+        }
+        return true;
+      }),
+    );
   });
 });
