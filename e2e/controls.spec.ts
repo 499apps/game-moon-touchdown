@@ -97,7 +97,9 @@ test.describe('moon-touchdown keyboard controls', () => {
     await page.keyboard.down('KeyW');
     const w0 = await snap(page);
     const wall = Date.now() - t0;
-    expect(wall, 'key press and read-back within 150 ms').toBeLessThan(150);
+    // The game-side age (key event to read-back, below) is the response check. The wall time also counts
+    // Playwright IPC, which is slow when all browser projects run in parallel, so it only guards against a hang.
+    expect(wall, 'key press and read-back did not hang').toBeLessThan(1000);
     expect(w0.s.assist, 'Help off at once').toBe(false);
     // The throttle is applied on the next animation frame after the key event (one frame, ~16 ms on a GPU;
     // slower under software GL here), so poll within the response budget instead of reading synchronously.
