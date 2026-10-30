@@ -127,16 +127,18 @@ A seed plus an input script replays the same trace. A test checks this.
 | Hadley Rille | 600-700 m | 250-450 m | 4-7 m/s | 232 kg |
 
 - **Fuel rule (F2):** start fuel = the helper's worst-seed use on the real terrain + about 31 kg (about 13.5 s of hover). So the helper lands below the 30 s fuel star, and an efficient pilot lands above it.
-- **Per-site fuel.** The R2 review measured the helper: 13.2 to 22.9 s left over 16 seeds × 6 sites, 96 of 96 soft. The other columns are hand calculations ("calc") until the operator copies in the `console.table` values of `src/sim/helper-sites.test.ts` (tests (b), (d) and (e)).
+- **Per-site fuel (measured 2026-10-30, `src/sim/helper-sites.test.ts`, real terrain, 16 seeds per site for (a), (b), (d) and 20 for (e)).** Helper left (a) is min-max; pilot left (b) and (d) are min / median.
 
-| Site | Start fuel | Full tank | Helper left (a) | Efficient pilot left (b) | Ring + thrifty: 3-star runs, median left (d) | Novice soft (e) |
+| Site | Start fuel | Full tank | Helper left (a), soft | Efficient pilot left (b), soft, fuel star | Ring + thrifty (d): 3-star runs, left min / median | Novice takeover at 150 m (e): soft, left median |
 | --- | --- | --- | --- | --- | --- | --- |
-| Sea of Tranquility | 177 kg | 74 s | 13-23 s (R2) | calc about 40 s | to measure | to measure |
-| Ocean of Storms | 188 kg | 79 s | 13-23 s (R2) | calc about 42 s | to measure | to measure |
-| Fra Mauro Highlands | 198 kg | 83 s | 13-23 s (R2) | calc about 44 s | to measure | to measure |
-| Descartes Highlands | 208 kg | 87 s | 13-23 s (R2) | calc about 45 s | to measure | to measure |
-| Taurus-Littrow Valley | 220 kg | 92 s | 13-23 s (R2) | calc about 47 s | to measure | to measure |
-| Hadley Rille | 232 kg | 96 s | 13-23 s (R2) | calc about 50 s | to measure | to measure |
+| Sea of Tranquility | 177 kg | 74 s | 13.2-20.7 s, 16/16 | 41.2 / 43.6 s, 16/16, 16/16 | 16/16, 36.1 / 41.2 s | 20/20, 18.1 s |
+| Ocean of Storms | 188 kg | 79 s | 13.6-21.3 s, 16/16 | 43.0 / 45.3 s, 16/16, 16/16 | 15/16, 35.8 / 41.3 s | 20/20, 18.2 s |
+| Fra Mauro Highlands | 198 kg | 83 s | 13.5-21.1 s, 16/16 | 44.3 / 46.7 s, 16/16, 16/16 | 14/16, 35.7 / 40.5 s | 20/20, 18.0 s |
+| Descartes Highlands | 208 kg | 87 s | 13.3-21.2 s, 16/16 | 45.8 / 48.1 s, 16/16, 16/16 | 11/16, 35.6 / 39.3 s | 20/20, 17.9 s |
+| Taurus-Littrow Valley | 220 kg | 92 s | 13.4-22.2 s, 16/16 | 47.8 / 50.6 s, 16/16, 16/16 | 10/16, 35.7 / 39.2 s | 20/20, 18.4 s |
+| Hadley Rille | 232 kg | 96 s | 13.9-22.9 s, 16/16 | 50.0 / 52.8 s, 16/16, 16/16 | 7/16, 35.6 / 37.9 s | 20/20, 18.9 s |
+
+- The helper never earns the fuel star (0 of 96) and every helped run lands softly. A HUD-only efficient pilot earns it on every run with 0 red steps. 3 stars are possible on every site. The scripted (d) pilot misses the ring or touches down hard on harder sites only when the late side drift beats its simple 12-degree lean (the "drift" bumps); a person who leans earlier does better. No start fuel change was needed.
 
 - **Tests that prove the stars are fair** (`src/sim/helper-sites.test.ts`, every block prints its table):
   - (b) The efficient pilot flies by the HUD bands and never shows red. It keeps 30 s or more on sites 1 to 3. It does not steer to the ring. On sites 4 to 6 the test prints the runs but does not assert the fuel.
