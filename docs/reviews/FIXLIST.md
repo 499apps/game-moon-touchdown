@@ -1,0 +1,296 @@
+# Moon Touchdown: R1 fix list
+
+Source: `docs/reviews/r1-review.md`. Goal: every rubric dimension at 4 or higher in R2.
+
+- **P0:** Fix before any release. These block the gate.
+- **P1:** Fix for R2. Each one stops a dimension from reaching 4.
+- **P2:** Needed to hold 4 with confidence. Do these in R2 if you can.
+- **P3:** Polish.
+- **[TEST-MODE ONLY]** marks items that change only `?test=1` behaviour or the tests. Real players do not see these defects.
+- Kit files (`src/kit/**`) are vendored. Make kit changes in `games-kit/src`, then run `pnpm kit:sync` here. Do not edit `src/kit/` in this repo.
+
+## P0
+
+### F-01 Keep the goal, the touchdown marker and the ground under the lander in frame
+
+- **Files:** `src/scene/moonScene.ts` (`updateCamera`), new screen overlay in `src/hud.ts` or `src/main.ts`.
+- **Defect:** At 363 m, the camera looks 39.5° down (half FOV 24°). The ground under the lander is 34° below the frame centre, so the ring, the marker and the beacon are off-screen until about 60 to 80 m.
+- **Fix:**
+  1. Above about 80 m, use a steep "descent cam": pitch 65° to 75°, distance from the lander 60 to 90 m. Aim at a point between the lander and the ground point under it, at about 45% of the way down. At pitch 72° and 70 m, the lander sits about 8° above the centre and its ground point about 7° below the centre. Both are in frame.
+  2. Below about 80 m, blend (smoothstep over 80 to 30 m) into the present low chase cam.
+  3. When the ring centre or the predicted marker is outside the frame, draw an edge arrow in the ring colour with the distance in metres. Project the world point with `camera.project()` and clamp it to the frame inset by the safe areas and the HUD.
+  4. Portrait: keep the predicted marker above the bottom 30% of the frame (the controls band). See F-14.
+- **Accept:** In desktop and phone screenshots at 360 m, 250 m and 18 m, the lander and the marker both show, and the ring shows or its edge arrow shows.
+
+```text
+ side view, now (363 m)                 side view, fixed (descent cam)
+ cam *                                   cam *
+      \  39.5° down, ±24°                    |\  72° down
+       \     lander o                        | o lander (8° above centre)
+        \           |                        | |
+ frame   \          | 365 m                  | |  ground point in frame
+ bottom   `-------- x ground point           | x (7° below centre)
+          (34° below centre: OFF)
+```
+
+### F-02 Earned stars and coloured icons render in the wrong colour
+
+- **File:** `src/game.css`.
+- **Defect:** The rules `.mt-star svg`, `.mt-site-star svg`, `.mt-gauge-icon svg` and `.mt-outcome-icon svg` set `color` on the SVG element itself. The state rules (`.mt-star.is-on`, `.mt-site-star.is-on`, `.mt-gauge[data-band] .mt-gauge-icon`, `.mt-debrief[data-outcome='bumpy'] .mt-outcome-icon`) set `color` only on the parent span. The SVG does not inherit it, so earned stars stay grey (desktop-5, phone-5).
+- **Fix:** Put the colour on the span only. Make the SVG inherit:
+
+```css
+.mt-star svg,
+.mt-site-star svg,
+.mt-gauge-icon svg,
+.mt-outcome-icon svg {
+  color: inherit;
+}
+```
+
+  Remove `color` from the shared selectors `.mt-star, .mt-star svg`, `.mt-site-star, .mt-site-star svg`, `.mt-gauge-icon, .mt-gauge-icon svg` and `.mt-outcome-icon, .mt-outcome-icon svg`, and keep it on the span selectors.
+- **Test:** In `e2e/smoke.spec.ts`, after the debrief, read `getComputedStyle(document.querySelector('.mt-star.is-on svg')).color` and expect the lemon colour from `src/kit/theme.ts`.
+
+### F-03 Make the ground read as Moon ground, not a white tiled carpet
+
+- **Files:** `src/scene/terrainView.ts`, `src/scene/textures.ts`, `src/scene/moonScene.ts` (lights), `src/main.ts` (`renderer.exposure`).
+- **Defect:** The ground reads near-white at the descent pitch. One 150 m tile with 70 craters of similar size repeats as a carpet (desktop-2, phone-2). The albedo variation is ±7% (macro) and ±4% (craters).
+- **Fix:**
+  1. Calibrate the brightness: start with sun intensity 10 → 6.5, `exposure` 1 → 0.9 and `REGOLITH` `#a39b90` → `#8e877d`. Tune until flat lit ground is about 0.40 to 0.55 sRGB luminance and baked shadows are about 0.10 to 0.18.
+  2. Break the repetition. In `onBeforeCompile` (both materials), sample the detail maps at 2 scales: `vUv` (tile 150 m) and `mat2(rot 37°) * vUv * 0.29` (tile about 520 m). Mix them 60/40. Fade the normal-map strength to about 30% beyond 600 m view distance.
+  3. Use a power-law crater size distribution in `makeRegolithDetail` (radius 1.5 to 40 px, about 250 craters, many small and few large). Add fresh bright craters with a dark-floor/bright-rim albedo of ±12%.
+  4. Raise the macro albedo variation in `TerrainView.setSource` from ±7% to about ±12%, with a second octave.
+  5. Use a per-site tint: maria darker and warmer, highlands lighter (see F-24).
+- **Accept:** A human reviewer cannot see the tile repeat in desktop-2 or phone-2 framing. The look gate reports a ground luminance in the band from step 1 (add this metric to the kit look gate).
+
+## P1
+
+### F-04 Remove the black seam dashes at the edge of the near terrain patch
+
+- **File:** `src/scene/terrainView.ts` (`buildGrid`, skirt).
+- **Defect:** The skirt triangles `(a, b, sa)` face outward only. From inside the patch, the camera sees the back faces (culled). T-junction cracks between the 30 m patch and the far mesh show the black clear colour, because the far mesh is discarded inside `uPatch`. The dashes show in desktop-2 and desktop-4, phone-3 and phone-4, and in the Firefox and WebKit picker baselines.
+- **Fix:** Add the reverse winding for every skirt quad: `indices.push(a, sa, b, b, sa, sb)`. Optionally, shrink the discard rectangle by 1 m on each side, so the far mesh tucks under the patch edge.
+- **Test:** In the look gate, count pixels with luminance < 0.03 below the horizon row in a frozen `?test=1` frame at the pick, 250 m and 18 m views. Expect 0.
+
+### F-05 Opening shot: show the horizon, the sky and the Earth before the descent
+
+- **File:** `src/scene/moonScene.ts` (`updateCamera`, phase `ready`).
+- **Defect:** The ready frame looks steeply down at the ground. It shows no horizon, no sky and no Earth (desktop-2, phone-2).
+- **Fix:** In `ready`, use an establishing frame. Put the camera low and behind the lander (pitch about 5° to 10° down), with the lander, the beacon, the horizon and the Earth in view. On start, swoop to the descent cam (F-01) over 1.5 s with an ease-in-out. With reduced motion, cut at once.
+
+### F-06 Make the lander readable at altitude
+
+- **Files:** `src/scene/moonScene.ts`, `src/scene/landerModel.ts`.
+- **Defect:** The lander is about 25 px tall at 363 m (desktop-2).
+- **Fix:** Cap the camera distance at about 90 m (F-01). Add a soft screen-space halo sprite (additive, `sizeAttenuation: false`, about 48 px) behind the lander. Fade it out below 60 m.
+
+### F-07 Make fuel matter
+
+- **Files:** `src/sim/sites.ts` (`fuel`), `src/sim/constants.ts` (`STAR_FUEL_SECONDS`, if you change it), `src/sim/flight.test.ts`, `docs/DESIGN.md` (section 4 table).
+- **Defect:** Tranquility starts with 326 s of hover fuel. A helper run uses about 47 s. The call-outs never fire, and the fuel star is free.
+- **Fix:**
+  1. Write a test that runs the helper from seeded starts on each site's real `.bin` and records the fuel seconds used.
+  2. Set each site's start fuel to "helper use + margin". Use a margin of about 90 s (site 1), 75, 60, 50, 40 and 35 s (site 6). Expect about 380 kg (Tranquility) down to about 280 kg (Hadley).
+  3. Make sure the 60 s call-out fires on sites 4 to 6 in a normal helper run, and that a manual player who hovers high for 30 s or more on site 3 gets it.
+- **Accept:** On sites 1 to 3 the helper lands with 30 s or more of fuel. On sites 4 to 6 the helper lands softly with 10 s or more. These are test assertions.
+
+### F-08 Make the speed-down colour depend on height
+
+- **Files:** `src/hud.ts` (`vsBand`, `update`), `src/main.ts` (pass the altitude), `src/game.css` (no blink while the helper is on), `src/hud.test.ts` (new).
+- **Defect:** At 12 m/s the gauge is red and blinks during correct helper flight (desktop-3, phone-3).
+- **Fix:** Compare speed down with a safe envelope that depends on height. Use the helper target as the envelope:
+
+```ts
+export function vsBand(down: number, height: number): Band {
+  const safe = Math.max(VS_GREEN, -assistTargetVs(height)); // 1.5..12 m/s
+  if (down < safe + 0.5) return 'good';
+  if (down < safe + 2.5) return 'warn';
+  return 'bad';
+}
+```
+
+  Below 10 m, keep the strict rule (green under 2, yellow under 4). Draw the green part of the bar to the envelope value, so the child sees "fast is OK up high, slow near the ground". Add the same envelope as a band on the debrief chart (`src/graphs.ts`).
+
+### F-09 The helper and the ring: say who steers, and show where to steer
+
+- **Files:** `src/main.ts` (`showDebrief`, the debrief reason text), the edge arrow from F-01, `src/sim/assist.ts` (optional).
+- **Defect:** The helper stops the drift only. It lands 40 to 120 m from the ring. The debrief says "Land inside the green ring for another star" with no hint.
+- **Fix:**
+  1. When the helper flew the engine and the ring star was missed, show: "The helper flies the engine. You steer: tilt toward the ring." Add a tilt-pad icon.
+  2. During a helper flight, pulse the ring edge arrow and the tilt pad once at 200 m.
+  3. Optional (see open question 7): add a "helper steers too" level for the youngest players. Steer with a position-plus-velocity loop toward the ring, capped at 10°. Award the ring star only when the child steered.
+
+### F-10 Phone first tap: Go must not start a free fall
+
+- **Files:** `src/main.ts` (`goBtn` handler, `onPrimary`), `index.html` (helper button label).
+- **Defect:** The green Go button starts the flight with the engine off and the helper off. With no input, the lander hits the ground at about 35 m/s after about 17 s.
+- **Fix:** Make Go start with the helper on until the player has 1 soft landing without the helper. Change the ready tip to show the slider icon with "take over". Give the helper button a short visible label ("Help") and a one-time pulse on the first ready screen.
+
+### F-11 Prove that the helper is fair on real terrain
+
+- **Files:** new `src/sim/helper-sites.test.ts` (read `public/data/terrain/<slug>.bin` with `node:fs`), `src/sim/assist.ts` (only if the test fails).
+- **Defect:** The property test uses flat ground only. Sites 4 to 6 have steep relief, and the helper does not avoid slopes over 12°.
+- **Fix:** For each of the 6 sites, run 50 seeds of `startConditions` with the helper on. Assert a soft landing on every run. If a slope bump happens, add slope avoidance: when the predictor reports `slope >= LIMITS.slope` below 60 m, lean the helper toward the downhill side for up to 20 m of travel.
+
+### F-12 Correct the history facts
+
+- **Files:** `src/sim/sites.ts` (Hadley fact), `README.md` line 9, `docs/DESIGN.md` line 56.
+- **Fix:**
+  - Hadley: "In July 1971 people drove a car on the Moon for the first time, here beside Hadley Rille: a winding channel about 1 to 1.5 km wide."
+  - README and DESIGN: replace "about a minute of margin" with "The first crew heard the '30 seconds' fuel call just before they touched down."
+
+### F-13 [TEST-MODE ONLY] Frozen animations leave the debrief, the stars and the call-out at opacity 0
+
+- **Files:** `games-kit/src/styles.css` (test-mode block), then `pnpm kit:sync`. Interim fix in `src/game.css`. Add checks to `e2e/smoke.spec.ts`.
+- **Defect:** `html.g499-test * { animation-play-state: paused }` holds each animation at its first keyframe. `mt-rise` and `mt-pop` start at `opacity: 0`, so the card, the earned stars and the call-out stay invisible. `toBeVisible()` still passes, because it does not check opacity.
+- **Fix (kit):** Replace the paused rule with `animation: none !important;` inside `html.g499-test`. Do this in the kit, so every game gets the end state.
+- **Interim (game):** `html.g499-test .mt-debrief-card, html.g499-test .mt-star.is-on, html.g499-test .mt-callout { animation: none; }`.
+- **Test:** Assert `getComputedStyle(card).opacity === '1'` for `#debrief .mt-debrief-card` and for one `.mt-star.is-on`.
+
+### F-14 Portrait: the ring hides behind the helper button
+
+- **Files:** `src/scene/moonScene.ts` (portrait framing), `src/game.css` (portrait helper button).
+- **Defect:** In portrait, the touchdown point sits at the bottom centre, under the 80 px helper button (phone-4).
+- **Fix:** In portrait, aim the camera so the predicted marker stays above the bottom 30% of the frame (F-01 step 4). Alternatively, move the helper button up into the gap above the slider and the pad (`bottom: calc(22px + 168px + 16px + safe-bottom)`).
+
+## P2
+
+### F-15 "Helper" badge is hard to read on bright ground
+
+- **File:** `src/game.css` (`.mt-badge`).
+- **Fix:** Use a solid dark backing: `background: rgba(10, 12, 32, 0.78); box-shadow: inset 0 0 0 2px var(--g499-mint);`.
+
+### F-16 The ready tip overlaps the throttle slider in portrait
+
+- **File:** `src/game.css` (`@media (orientation: portrait) and (max-width: 719px) .mt-ready`).
+- **Fix:** Use `bottom: calc(min(44vh, 280px) + 40px + var(--g499-safe-bottom))`, so the tip sits above the slider top (phone-2).
+
+### F-17 Phone picker: the drawer button overlaps the card, and "How to fly" is below the fold
+
+- **Files:** `games-kit/src/styles.css` (`.g499-overlay` on 719 px or less), then `pnpm kit:sync`. `src/game.css` (`.mt-site` on short screens).
+- **Fix:**
+  1. On phones, give `.g499-overlay` a top padding of `calc(var(--g499-touch) + 16px + var(--g499-safe-top))`.
+  2. Below 760 px height, use `.mt-site { min-height: 120px }` and an emblem of 52 px.
+  3. Alternatively, move "How to fly" into the card header as a 56 px icon button on the left.
+
+### F-18 The Earth is cut off at the top and hidden behind the HUD in low flight
+
+- **File:** `src/scene/sky.ts`.
+- **Fix:** Lower the elevation from 9° to about 3.5°, so it sits in the clear band between the horizon and the HUD at the low chase pitch (about 14° down). Keep the azimuth away from the HUD columns (desktop-4, phone-4). Update DESIGN section 5 ("about 9° up").
+
+### F-19 Terrain provenance cannot be reproduced
+
+- **Files:** `scripts/terrain/fetch.py`, `scripts/terrain/SOURCE.md`, `public/data/terrain/sites.json`.
+- **Defect:** The script does not apply the documented column Gaussian (σ 1.6 px). It does not write the `processing` field. Its header says "LDEM_1024, 30 m".
+- **Fix:**
+  1. Add the Gaussian step (numpy convolution on columns, σ 1.6 px) before the 0.5 m quantisation.
+  2. Write `processing` and a `sha256` per `.bin` into `sites.json`.
+  3. Fix the header comment. List `numpy` as the only dependency in `SOURCE.md`.
+  4. Re-run the script and confirm that the hashes match the committed files. If they do not match, commit the regenerated files.
+
+### F-20 Shared play: give parents more to talk about
+
+- **Files:** `src/sim/sites.ts` (`facts: string[]`, `talk: string`), new `src/moonMap.ts` (original SVG Moon disc drawn in code, site dot from `lat`/`lon`), `src/main.ts`, `index.html` (debrief and picker), `src/graphs.ts`.
+- **Fix:**
+  1. Show a small Moon map with the site dot on the picker card and the debrief.
+  2. Add a "real ground" line: "This ground is real. A laser on a spacecraft measured every hill."
+  3. Add a "you vs the real crew" line, for example "The first crew touched down at about 0.5 m/s. You: 1.4 m/s."
+  4. Use 2 or 3 facts per site, and rotate them per run.
+  5. Add one "Talk about it" question per site for the parent, for example "Why does the lander need only a small push here?"
+
+### F-21 A touchdown cue under the lander
+
+- **File:** `src/scene/moonScene.ts`.
+- **Defect:** At a 12° sun, the real shadow falls about 4.7 × height to the west, so it is off-screen until the last metres.
+- **Fix:** Below 40 m, add a soft ground glow under the lander (the engine light already exists; add a faint additive decal). It grows and sharpens as the height drops. Say in DESIGN that it is a visual aid.
+
+### F-22 A helper icon and label that children understand
+
+- **Files:** `src/icons.ts` (`assist`), `index.html`.
+- **Fix:** Draw a lander with a small hand or wings under it. Add a visible label under the button ("Help"). Keep `aria-pressed`.
+
+### F-23 Progression honesty and a reason to replay
+
+- **Files:** `src/progress.ts` (schema v2 with a migration from v1 in `sanitizeProgress`), `src/main.ts` (`renderPicker`, `showDebrief`), `src/scene/moonScene.ts`.
+- **Fix:**
+  1. Store `helped: boolean` with the best stars. Show a small helper mark on the picker stars.
+  2. Store the best run's trace (120 points or fewer, under the `g499:` key) and draw it as a faint ghost trail on "Again".
+
+### F-24 Make each site look different
+
+- **Files:** `src/sim/sites.ts` (look parameters), `src/scene/terrainView.ts`.
+- **Fix:** Give each site a regolith tint, a crater density and a crater size scale. Maria (Tranquility, Storms) are darker with fewer large craters. Highlands (Fra Mauro, Descartes) are lighter with more craters. The Taurus-Littrow floor is darker under bright massifs.
+
+### F-25 [TEST-MODE ONLY] Wider e2e coverage
+
+- **File:** `e2e/smoke.spec.ts`.
+- **Fix:** Parameterise the helper round over all 6 sites. Unlock them with `localStorage` progress before load. Add a portrait phone screenshot at 250 m with a mask for dust, and assert the touchdown marker is in frame through a test-API field `markerOnScreen`.
+
+### F-26 Slider jumps on first touch
+
+- **File:** `src/input/devices.ts` (`moveSlider`).
+- **Defect:** The slider is absolute. A tap in the middle gives lever 0.5, which is about 31% throttle, and the lander climbs.
+- **Fix:** Make the slider relative: on `pointerdown`, store the start Y and the current lever. On `pointermove`, change the lever by the drag distance. Keep "tap on the knob" as a no-op.
+
+## P3
+
+### F-27 The rail title truncates to "MOON TOUCHD…"
+
+- **Files:** `games-kit/src/shell.ts` and `menu.ts` (add an optional `shortTitle`), then `pnpm kit:sync`. `src/main.ts` (`shortTitle: 'Moon'`). Or, in the kit, allow 3 lines at 10 px.
+
+### F-28 The engine hum is too low for phone speakers
+
+- **File:** `src/sound.ts` (`engine`).
+- **Fix:** Add a second, quieter layer at 3 times the frequency (156 to 234 Hz, volume × 0.4). Add a soft noise "hiss" through the kit `whoosh` at a low rate. Keep the volume calm.
+
+### F-29 Clearer keys for tilt away and toward
+
+- **Files:** `src/input/mapping.ts` (`KEYS`), `index.html` (help card), `README.md`.
+- **Fix:** Drop E/Q from the help text (keep them working). Show "W/S engine · arrow keys or I J K L tilt". Move throttle off ↑/↓, so the arrows tilt in 4 directions.
+
+### F-30 Complete the "Honest simplifications"
+
+- **File:** `docs/DESIGN.md` section 9.
+- **Fix:** Add these points:
+  - The real engine throttled from about 10% to 60%, plus a fixed full setting. The game allows 10% to 100%.
+  - The dry mass is a game value. The real lander was heavier at touchdown, with hover at about 25 to 30% throttle.
+  - The real manual attitude rates were slower (about 20°/s).
+  - The fuel seconds use the current mass (about 9% conservative).
+
+### F-31 "Clear data" is below the fold on a 720 px desktop rail
+
+- **File:** `games-kit/src/styles.css` (rail), then `pnpm kit:sync`.
+- **Fix:** Below 780 px height, reduce the rail item height to 56 px (minimum target) and the gap to 4 px, so all 11 items fit.
+
+### F-32 Haptic touchdown (Android)
+
+- **File:** `src/main.ts` (`onTouchdown`).
+- **Fix:** Call `navigator.vibrate?.(soft ? 30 : [40, 60, 40])` when touch controls are on, sound is not muted and reduced motion is off. It makes no network use.
+
+## Dimension → items needed for a score of 4 or higher
+
+| Dimension | Now | Must fix | Should fix |
+| --- | --- | --- | --- |
+| Core loop & fun | 3 | F-01, F-07, F-09 | F-23 |
+| First-run & onboarding | 3 | F-05, F-10, F-22 | F-16, F-17 |
+| Controls & game feel | 3 | F-26, plus a human playtest of the lever and pad | F-28, F-29, F-32 |
+| Difficulty & fairness | 3 | F-07, F-08, F-09, F-11 | F-21 |
+| Progression & retention | 3 | F-02, F-07 | F-23, F-24 |
+| Shared play / fact cards | 3 | F-12, F-20 | F-30 |
+| Visual direction & audio | 2 | F-03, F-04, F-05, F-06 | F-18, F-21, F-24, F-28 |
+| Clarity & feedback | 2 | F-01, F-02, F-08, F-15 | F-14, F-21 |
+| Kids UX, accessibility & phones | 3 | F-14, F-16, F-17 | F-22, F-27, F-31 |
+| Technical quality & tests | 4 | Keep at 4: F-13, F-19 | F-11, F-25 |
+
+## Order of work
+
+```mermaid
+flowchart LR
+  A[F-02 CSS colour<br/>F-13 test-mode kit] --> B[F-01 camera<br/>F-05 opening<br/>F-06 lander halo<br/>F-14 portrait]
+  B --> C[F-03 ground look<br/>F-04 seams]
+  C --> D[F-07 fuel<br/>F-08 HUD band<br/>F-11 helper test]
+  D --> E[F-09 helper copy<br/>F-10 Go<br/>F-12 facts]
+  E --> F[P2 items, then R2 screenshots<br/>at the same 5 + 5 frames]
+```
+
+Do F-02 and F-13 first. They are small, and they make the R2 screenshots honest.
