@@ -333,3 +333,62 @@ Fix round F1 was done by editing files only. Nothing ran in this round (no typec
 | F-30 | DONE | Four points added to DESIGN section 9. |
 | F-31 | SKIPPED | Kit change. |
 | F-32 | DONE | `navigator.vibrate` on touchdown with touch controls on, sound on, reduced motion off and not in test mode. |
+
+## F2 fuel
+
+Goal: the fuel star is earned, not free, and the game stays kind. This round edited files only. Nothing ran. The operator runs `pnpm test` and reads the 3 tables that `src/sim/helper-sites.test.ts` prints.
+
+### Input (measured after F1, helper, 16 seeds per site, real terrain)
+
+| Site | Start fuel | Helper used | Helper left |
+| --- | --- | --- | --- |
+| tranquility | 370 kg | 51-59 s | 91-98 s |
+| storms | 330 kg | 56-63 s | 71-79 s |
+| fra-mauro | 300 kg | 60-68 s | 55-62 s |
+| descartes | 270 kg | 65-73 s | 39-46 s |
+| taurus-littrow | 265 kg | 69-77 s | 32-41 s |
+| hadley | 275 kg | 73-82 s | 31-40 s |
+
+The fuel star (30 s) was free on every site.
+
+### Hand calculation
+
+1. Hover flow = m · g / (Isp · g0) = m · 1.62 / 3050. At 4,480 kg that is about 2.38 kg/s. At 4,670 kg it is about 2.48 kg/s. (The brief said about 2.76 kg/s. The constants give 2.38 to 2.48 kg/s.)
+2. Fuel seconds = f · 1882.7 / (4300 + f). The inverse is f = 4300 · s / (1882.7 − s).
+3. Convert the worst-seed "left" to kg. Helper use (kg) = start fuel − that value.
+4. The helper commands accelerations, so its fuel use scales with the mean mass. A lighter lander uses about 1% to 4% less fuel.
+5. New start fuel = scaled worst-seed use + about 31 kg (about 13.5 s of hover at the end).
+6. Spread check: the best seed keeps the old spread (17 to 21 kg), so it leaves about 21 to 23 s. That is below 25 s.
+
+### Result (hand calculation; replace with the measured numbers)
+
+| Site | Start fuel | Full tank | Helper left (calc) | Efficient pilot left (calc) |
+| --- | --- | --- | --- | --- |
+| tranquility | 177 kg | 74.4 s | 13.5-21 s | about 40 s |
+| storms | 188 kg | 78.9 s | 13.5-22 s | about 42 s |
+| fra-mauro | 198 kg | 82.9 s | 13.5-21 s | about 44 s |
+| descartes | 208 kg | 86.9 s | 13.5-21 s | about 45 s |
+| taurus-littrow | 220 kg | 91.6 s | 13.5-23 s | about 47 s |
+| hadley | 232 kg | 96.4 s | 13.5-23 s | about 50 s |
+
+### Changes
+
+| Item | Status | Note |
+| --- | --- | --- |
+| Start fuel | DONE | `src/sim/sites.ts`: 177/188/198/208/220/232 kg. |
+| Test (a) helper | DONE | Every site, 16 seeds: soft, fuel left in [10, 25) s, no fuel star, never dry, 60 s call-out in 75% of runs or more. Prints a table. |
+| Test (b) efficient pilot | DONE | Uses only HUD values. Engine off to 20 m/s, hold 20 m/s, constant-deceleration brake at 60% of the spare thrust to 1.6 m/s at 6 m, then 1.0 m/s. Leans against the drift only while the engine pushes. Sites 1-3: soft and 30 s or more. Sites 4-6: printed only. |
+| Test (c) takeover | DONE | Sites 1-3, 4 seeds, 6 manual styles (efficient for 4/12/20 s, hover for 10/25 s, engine off for 8 s), then the helper. When fuel ≥ `assistFuelNeed`: soft and never dry. At least 8 such states. Prints a table. |
+| Helper fuel need | DONE | `assistFuelNeed(height, vy, hs, hoverThrottle)` in `src/sim/assist.ts`. It uses the vertical momentum identity plus the profile time, × 1.05 + 2 s. It returns Infinity when full thrust cannot stop the fall in half the height. A flat-ground property test checks that it covers the helper's use. |
+| What-if run | DONE | `flyHelper(terrain, start or state)` and `Flight.fromState` in `src/sim/flight.ts`. |
+| Low-fuel prompt | DONE | Manual flight below 15 s (`LOW_FUEL_PROMPT_SECONDS`): one prompt per run, "Low fuel: tap Help to land safely", with the helper icon. The Help button pulses. The 60 s and 30 s call-outs now show the fuel icon. |
+| Out of fuel | DONE | `fuelOutAdvice(height)` in `src/sim/judge.ts`. Above 20 m: "Out of fuel up high: start braking a bit later next time." plus a tip. Near the ground: "So close!" plus a tip. A test checks that it uses no shaming words. |
+| HUD star tick | DONE | Filled star tick at 30 s on the fuel bar, plain tick at 60 s. Below 30 s the bar is red and the star tick fades. |
+| Debrief | DONE | "Fuel left: N s (star at 30 s)" with a star that fills when earned. "Helper would have left ~M s" (what-if helper run from the same start) when the child flew and missed the ring or fuel star. A helped run that missed the fuel star says the helper is careful and uses a lot of fuel. |
+| Docs | DONE | DESIGN (fuel section, site table, per-site fuel table), README how to play, help card line. |
+
+### To do after the run
+
+- Copy the measured "helper left" and "pilot left" ranges into the 2 tables above and into DESIGN section 4.
+- If a site's helper minimum is below 12 s, add about 2.5 kg per missing second. If its maximum is 25 s or more, remove about 2.5 kg per extra second. (Near the end of a run, 1 kg is about 0.43 s.)
+- The debrief and HUD screenshots change. Run `pnpm e2e:update` after a human checks them.

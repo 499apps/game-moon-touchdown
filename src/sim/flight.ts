@@ -129,6 +129,17 @@ export class Flight {
     this.record();
   }
 
+  /** A flight that starts from any lander state (for what-if runs from mid-flight). */
+  static fromState(terrain: Terrain, s: LanderState, g = G_MOON): Flight {
+    const f = new Flight(terrain, { pos: s.pos, vel: s.vel, fuel: s.fuel }, g);
+    f.state = cloneLander(s);
+    f.lastFuelSeconds = fuelSeconds(f.state, g);
+    f.height = heightAboveGround(f.state, terrain);
+    f.trace.length = 0;
+    f.record();
+    return f;
+  }
+
   /** Height of the lowest footpad above the ground (m). */
   get altitude(): number {
     return this.height;
@@ -228,6 +239,25 @@ export class Flight {
       throttle: s.throttle,
     });
   }
+}
+
+/** Longest what-if run (ticks): 400 s. */
+export const WHAT_IF_MAX_TICKS = 60 * 400;
+
+/**
+ * Let the hover helper fly alone, from a start or from a mid-flight state, until touchdown. The
+ * debrief uses it for "Helper would have left ~M s"; the tests use it to prove the helper is fair.
+ */
+export function flyHelper(
+  terrain: Terrain,
+  from: StartConditions | LanderState,
+  maxTicks = WHAT_IF_MAX_TICKS,
+): { flight: Flight; events: FlightEvent[] } {
+  const flight = 'tiltX' in from ? Flight.fromState(terrain, from) : new Flight(terrain, from);
+  const input: PilotInput = { ...IDLE_INPUT, assist: true };
+  const events: FlightEvent[] = [];
+  while (flight.phase === 'flying' && flight.tick < maxTicks) events.push(...flight.step(input));
+  return { flight, events };
 }
 
 /** One step of an input script: from this tick on, use this input. */

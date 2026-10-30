@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { assistTargetVs } from './sim/assist';
-import { LIMITS } from './sim/constants';
-import { VS_GREEN, VS_STRICT_HEIGHT, VS_YELLOW, vsBand, vsBarMax, vsEnvelope, vsLimits } from './hud';
+import { LIMITS, STAR_FUEL_SECONDS } from './sim/constants';
+import {
+  FUEL_TICK_SECONDS,
+  VS_GREEN,
+  VS_STRICT_HEIGHT,
+  VS_YELLOW,
+  fuelMarkPercent,
+  vsBand,
+  vsBarMax,
+  vsEnvelope,
+  vsLimits,
+} from './hud';
 import { niceMax } from './graphs';
 
 describe('speed-down bands', () => {
@@ -46,6 +56,18 @@ describe('speed-down bands', () => {
         );
       }),
     );
+  });
+});
+
+describe('fuel bar marks', () => {
+  it('places the star tick at 30 s and the plain tick at 60 s of the full tank', () => {
+    expect(FUEL_TICK_SECONDS).toBe(60);
+    expect(fuelMarkPercent(STAR_FUEL_SECONDS, 75)).toBeCloseTo(40, 9);
+    expect(fuelMarkPercent(FUEL_TICK_SECONDS, 75)).toBeCloseTo(80, 9);
+    // A small tank pins the marks to the right end; bad input stays on the bar.
+    expect(fuelMarkPercent(60, 40)).toBe(100);
+    expect(fuelMarkPercent(-5, 75)).toBe(0);
+    expect(fuelMarkPercent(30, Number.NaN)).toBe(100);
   });
 });
 

@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { createRng } from '../kit/prng';
 import { LEG_DROP, LIMITS } from './constants';
-import { assistTargetVs, createAssistMemory } from './assist';
-import { Flight, IDLE_INPUT, runScript, type FlightEvent, type PilotInput, type ScriptStep } from './flight';
+import { assistFuelNeed, assistTargetVs, createAssistMemory } from './assist';
+import { Flight, IDLE_INPUT, flyHelper, runScript, type FlightEvent, type PilotInput, type ScriptStep } from './flight';
+import { hoverThrottle } from './lander';
 import { predictTouchdown } from './predictor';
 import { SITES, startConditions } from './sites';
 import { Terrain } from './terrain';
@@ -75,6 +76,48 @@ describe('flight', () => {
     const sixty = events.filter((e) => e.type === 'callout' && e.seconds === 60);
     expect(sixty).toHaveLength(1);
     expect(f.fuelSeconds).toBeLessThanOrEqual(60);
+  });
+
+  it('flyHelper continues from a mid-flight state with the same physics', () => {
+    const start = { pos: { x: 0, y: 300 + LEG_DROP, z: 0 }, vel: { x: 1, y: -6, z: 0 }, fuel: 400 };
+    const whole = flyHelper(FLAT, start).flight;
+    // Fly 10 s by hand (engine at 20%, a small lean), then hand over from that exact state.
+    const f = new Flight(FLAT, start);
+    runScript(f, [{ tick: 0, input: { ...IDLE_INPUT, throttle: 0.2, tiltX: 0.05 } }], 600);
+    const s = f.state;
+    const later = flyHelper(FLAT, s).flight;
+    expect(later.trace[0]?.height).toBeCloseTo(f.altitude, 9);
+    expect(later.start.fuel).toBe(s.fuel);
+    expect(later.result?.verdict.outcome).toBe('soft');
+    expect(whole.result?.verdict.outcome).toBe('soft');
+  });
+
+  it('the helper fuel estimate covers what the helper uses over flat ground (property)', () => {
+    fc.assert(
+      fc.property(
+        fc.record({
+          // From 150 m up there is time to stop a 4 m/s drift; lower states are in helper-sites.test.ts.
+          height: fc.double({ min: 150, max: 700, noNaN: true }),
+          vy: fc.double({ min: -20, max: 3, noNaN: true }),
+          drift: fc.double({ min: 0, max: 4, noNaN: true }),
+        }),
+        (p) => {
+          const f = new Flight(FLAT, { pos: { x: 0, y: p.height + LEG_DROP, z: 0 }, vel: { x: p.drift, y: p.vy, z: 0 }, fuel: 400 });
+          const need = assistFuelNeed(f.altitude, p.vy, p.drift, hoverThrottle(f.state));
+          if (!Number.isFinite(need)) return true;
+          const r = flyHelper(FLAT, f.start).flight.result;
+          if (!r || r.verdict.outcome !== 'soft') return false;
+          return f.fuelSeconds - r.touchdown.fuelSeconds <= need;
+        },
+      ),
+      { numRuns: 30 },
+    );
+  });
+
+  it('the helper fuel estimate is Infinity only when the fall cannot be stopped in time', () => {
+    expect(Number.isFinite(assistFuelNeed(400, -10, 0, 0.16))).toBe(true);
+    expect(assistFuelNeed(10, -30, 0, 0.16)).toBe(Infinity);
+    expect(assistFuelNeed(400, -10, 0, 0.16)).toBeGreaterThan(assistFuelNeed(100, -5, 0, 0.16));
   });
 
   it('runs out of fuel cleanly: no negative fuel, a single fuel-out event', () => {

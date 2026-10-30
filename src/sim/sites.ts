@@ -3,9 +3,10 @@
  * facts (256 x 256, 60 m, 0.5 m units) match public/data/terrain/sites.json. Start conditions
  * come from a seeded PRNG, so a seed replays the same approach.
  *
- * Fuel per site = what the hover helper uses on the real terrain plus a margin that shrinks
- * with difficulty (about 90 s at site 1 down to about 35 s at site 6). src/sim/helper-sites.test.ts
- * checks it: sites 1-3 land with 30 s or more, sites 4-6 with 10 s or more and the 60 s call-out.
+ * Fuel per site (F2): the hover helper lands with about 13-22 s of hover fuel left, below the
+ * 30 s fuel star, so the star is earned. An efficient pilot (fall fast up high, brake late and
+ * hard, little hovering) keeps 30 s or more. src/sim/helper-sites.test.ts checks both on the real
+ * terrain and prints a per-site table for re-tuning.
  */
 import type { Rng } from '../kit/prng';
 import type { StartConditions } from './flight';
@@ -67,7 +68,7 @@ export const SITES: readonly SiteInfo[] = [
     offset: { min: 40, max: 120 },
     drift: { min: 0.5, max: 2 },
     descent: { min: 6, max: 9 },
-    fuel: 370,
+    fuel: 177,
     facts: [
       'People first landed on the Moon here in July 1969. The ground is a wide, flat plain of old, dark lava.',
       'The first crew left a mirror here. Scientists still bounce laser light off it to measure how far away the Moon is.',
@@ -87,7 +88,7 @@ export const SITES: readonly SiteInfo[] = [
     offset: { min: 80, max: 200 },
     drift: { min: 1, max: 3 },
     descent: { min: 7, max: 10 },
-    fuel: 330,
+    fuel: 188,
     facts: [
       'A crew landed here in November 1969, a short walk from a robot lander that arrived in 1967. They brought parts of it home.',
       'The Ocean of Storms is the biggest dark lava plain on the Moon. It has no storms: the Moon has no air.',
@@ -105,7 +106,7 @@ export const SITES: readonly SiteInfo[] = [
     offset: { min: 120, max: 260 },
     drift: { min: 2, max: 4 },
     descent: { min: 8, max: 11 },
-    fuel: 300,
+    fuel: 198,
     facts: [
       'A crew landed in these hills in February 1971. One explorer hit two golf balls here, in gravity one sixth of the Earth.',
       'The crew pulled a small cart with two wheels to carry their tools and rocks up the hills.',
@@ -124,7 +125,7 @@ export const SITES: readonly SiteInfo[] = [
     offset: { min: 160, max: 320 },
     drift: { min: 2.5, max: 5 },
     descent: { min: 8, max: 12 },
-    fuel: 270,
+    fuel: 208,
     facts: [
       'In April 1972 a crew landed in these bright highlands, far from the dark lava plains. The rocks here are very old.',
       'The crew drove a car on the Moon here. Its fastest run was about 18 km/h, a little faster than a child can run.',
@@ -142,7 +143,7 @@ export const SITES: readonly SiteInfo[] = [
     offset: { min: 200, max: 380 },
     drift: { min: 3, max: 6 },
     descent: { min: 9, max: 12 },
-    fuel: 265,
+    fuel: 220,
     facts: [
       'The last people on the Moon left this deep valley in December 1972. They found orange soil made of tiny glass beads.',
       'On the way here, the crew took a famous photo of the whole Earth, fully lit by the Sun.',
@@ -161,7 +162,7 @@ export const SITES: readonly SiteInfo[] = [
     offset: { min: 250, max: 450 },
     drift: { min: 4, max: 7 },
     descent: { min: 9, max: 13 },
-    fuel: 275,
+    fuel: 232,
     facts: [
       'In July 1971 people drove a car on the Moon for the first time, here beside Hadley Rille: a winding channel about 1 to 1.5 km wide.',
       'Here a crew member dropped a hammer and a feather at the same time. With no air to slow the feather, both hit the ground together.',

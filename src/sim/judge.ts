@@ -59,6 +59,42 @@ export function scoreStars(verdict: Verdict, distance: number, fuelSecondsLeft: 
   return { soft, close, fuel, stars: (soft ? 1 : 0) + (close ? 1 : 0) + (fuel ? 1 : 0) };
 }
 
+/** Above this height (m), running dry counts as "up high". */
+export const FUEL_OUT_HIGH = 20;
+
+export interface FuelAdvice {
+  text: string;
+  tip: string;
+}
+
+/** Kind words when the tank ran dry, by the height where it happened. Never shaming. */
+export function fuelOutAdvice(height: number): FuelAdvice {
+  if (!(height <= FUEL_OUT_HIGH)) {
+    return {
+      text: 'Out of fuel up high: start braking a bit later next time.',
+      tip: 'Tip: fall faster up high, then brake hard near the ground. Help can also fly the engine for you.',
+    };
+  }
+  return {
+    text: 'Out of fuel just above the ground. So close!',
+    tip: 'Tip: hover a little less on the way down. Help can also fly the engine for you.',
+  };
+}
+
+/** The reason line when the landing was soft but the fuel star was missed. */
+export const FUEL_STAR_TIP = `Keep ${STAR_FUEL_SECONDS} s of fuel for another star: fall faster up high, then brake later and harder.`;
+
+/** Debrief fuel line: what was left and where the star is. */
+export function fuelLeftText(seconds: number): string {
+  const s = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
+  return `Fuel left: ${s} s (star at ${STAR_FUEL_SECONDS} s)`;
+}
+
+/** Debrief line: what the helper would have left from the same start. */
+export function helperLeftText(seconds: number): string {
+  return `Helper would have left ~${Math.max(0, Math.round(seconds))} s`;
+}
+
 /** Short, kind words for each bump reason. */
 export const BUMP_TEXT: Readonly<Record<BumpReason, string>> = {
   fast: 'Too fast down, so the legs went boing. Aim for under 2 m/s.',

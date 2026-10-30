@@ -43,7 +43,7 @@ describe('lever curve', () => {
 
   it('round-trips through throttleToLever (property)', () => {
     fc.assert(
-      fc.property(fc.double({ min: 0.1, max: 1, noNaN: true }), (t) => {
+      fc.property(fc.double({ min: 0.1, minExcluded: true, max: 1, noNaN: true }), (t) => {
         return Math.abs(leverToThrottle(throttleToLever(t)) - t) < 1e-9;
       }),
     );

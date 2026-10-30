@@ -42,9 +42,9 @@
           </svg>
           <span class="mt-num" id="drift-value">0.0</span>
         </div>
-        <div class="mt-gauge mt-fuel" role="group" aria-label="Fuel in seconds">
+        <div class="mt-gauge mt-fuel" role="group" aria-label="Fuel in seconds, star at 30 seconds">
           <span class="mt-gauge-icon" data-icon="fuel"></span>
-          <div class="mt-fuel-bar" aria-hidden="true"><i class="mt-fuel-fill" id="fuel-fill"></i><b class="mt-fuel-mark" id="fuel-mark"></b></div>
+          <div class="mt-fuel-bar" aria-hidden="true"><i class="mt-fuel-fill" id="fuel-fill"></i><b class="mt-fuel-mark" id="fuel-mark"></b><b class="mt-fuel-star" id="fuel-star"></b></div>
           <span class="mt-num" id="fuel-value">0</span><span class="mt-unit">s</span>
         </div>
         <div class="mt-gauge mt-thr" role="group" aria-label="Engine power">
@@ -113,7 +113,7 @@
             <li><span class="mt-help-icon" data-icon="tilt"></span><span><b>Tilt</b> right pad · arrow keys or I J K L · right stick</span></li>
             <li><span class="mt-help-icon" data-icon="assist"></span><span><b>Help</b> big button · Space · A button. It flies the engine for you. You steer to the ring.</span></li>
             <li><span class="mt-help-icon" data-icon="down"></span><span><b>Touch down</b> under 2 m/s down, under 1.2 m/s sideways, standing level.</span></li>
-            <li><span class="mt-help-icon" data-icon="fuel"></span><span><b>Fuel</b> counts in seconds of hovering. Chimes at 60 s and 30 s.</span></li>
+            <li><span class="mt-help-icon" data-icon="fuel"></span><span><b>Fuel</b> counts in seconds of hovering. Chimes at 60 s and 30 s. Land with 30 s or more (the star on the bar) for the fuel star.</span></li>
             <li><span class="mt-help-icon" data-icon="earth"></span><span>The Moon pulls 1.62 m/s², one sixth of the Earth, so a small push holds you up.</span></li>
           </ul>
           <p class="mt-help-keys">P pause · M sound</p>
@@ -146,6 +146,10 @@
             <span class="g499-hud-pill" aria-label="Distance from the target"><span class="mt-pill-icon" data-icon="target"></span><span id="stat-dist">0</span></span>
             <span class="g499-hud-pill" aria-label="Fuel left"><span class="mt-pill-icon" data-icon="fuel"></span><span id="stat-fuel">0</span></span>
             <span class="g499-hud-pill" aria-label="Flight time"><span class="mt-pill-icon" data-icon="clock"></span><span id="stat-time">0</span></span>
+          </div>
+          <div class="mt-fuel-note" id="fuel-note">
+            <p><span class="mt-fuel-note-icon" data-icon="fuel"></span><span id="fuel-left-text"></span><span class="mt-fuel-note-star" id="fuel-note-star"></span></p>
+            <p id="fuel-helper" hidden><span class="mt-fuel-note-icon" data-icon="assist"></span><span id="fuel-helper-text"></span></p>
           </div>
           <figure class="mt-chart">
             <canvas id="chart" aria-label="Descent chart: height and speed down over time"></canvas>

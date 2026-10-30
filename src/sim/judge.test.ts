@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { DEG, LIMITS, STAR_FUEL_SECONDS, TARGET_RADIUS } from './constants';
-import { judgeTouchdown, scoreStars } from './judge';
+import { FUEL_OUT_HIGH, FUEL_STAR_TIP, fuelLeftText, fuelOutAdvice, helperLeftText, judgeTouchdown, scoreStars } from './judge';
 
 const ok = { vs: 1, hs: 0.5, tilt: 2 * DEG, slope: 3 * DEG };
 
@@ -64,5 +64,35 @@ describe('stars', () => {
 
   it('gives no stars for a bumpy touchdown', () => {
     expect(scoreStars(bumpy, 0, 500)).toEqual({ soft: false, close: false, fuel: false, stars: 0 });
+  });
+});
+
+describe('fuel words', () => {
+  it('explains running dry kindly, with a tip, up high and near the ground', () => {
+    const high = fuelOutAdvice(FUEL_OUT_HIGH + 100);
+    expect(high.text).toBe('Out of fuel up high: start braking a bit later next time.');
+    expect(high.tip).toMatch(/^Tip: /);
+    const low = fuelOutAdvice(FUEL_OUT_HIGH - 5);
+    expect(low.text).toMatch(/So close!/);
+    expect(low.tip).toMatch(/^Tip: /);
+    // NaN height is treated as "up high", never as an error.
+    expect(fuelOutAdvice(Number.NaN).text).toBe(high.text);
+  });
+
+  it('never uses shaming words (property)', () => {
+    const harsh = /\b(fail\w*|bad|wrong|crash\w*|stupid|lose|loser|lost|dead|die|died)\b/i;
+    fc.assert(
+      fc.property(fc.double({ min: -10, max: 2000, noNaN: true }), (h) => {
+        const a = fuelOutAdvice(h);
+        return !harsh.test(a.text) && !harsh.test(a.tip);
+      }),
+    );
+    expect(harsh.test(FUEL_STAR_TIP)).toBe(false);
+  });
+
+  it('shows the fuel left with the star line, and the helper number to beat', () => {
+    expect(fuelLeftText(41.9)).toBe(`Fuel left: 41 s (star at ${STAR_FUEL_SECONDS} s)`);
+    expect(fuelLeftText(-3)).toBe(`Fuel left: 0 s (star at ${STAR_FUEL_SECONDS} s)`);
+    expect(helperLeftText(17.6)).toBe('Helper would have left ~18 s');
   });
 });

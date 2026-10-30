@@ -269,6 +269,41 @@
   opacity: 0.85;
 }
 
+/* The fuel-star line (30 s): a thin tick through the bar with a filled star on top. */
+.mt-fuel-star {
+  position: absolute;
+  top: -13px;
+  width: 14px;
+  height: 25px;
+  margin-left: -7px;
+  color: var(--g499-lemon);
+  pointer-events: none;
+}
+
+.mt-fuel-star svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  color: inherit;
+  stroke-width: 1.6;
+}
+
+.mt-fuel-star::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 12px;
+  width: 2px;
+  height: 13px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+/* Below the star line the fuel star is gone: the tick fades. */
+.mt-fuel[data-band='bad'] .mt-fuel-star {
+  opacity: 0.4;
+}
+
 .mt-thr-fill {
   background: linear-gradient(90deg, var(--g499-tangerine), var(--g499-lemon));
 }
@@ -298,6 +333,29 @@
 
 .mt-callout[data-band='bad'] {
   color: var(--g499-coral);
+}
+
+.mt-callout-icon,
+.mt-callout-icon svg {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  vertical-align: -5px;
+  color: inherit;
+}
+
+.mt-callout-icon {
+  margin-right: 8px;
+}
+
+/* The one-time low-fuel prompt: longer text, so it may wrap on narrow phones. */
+.mt-callout.is-prompt {
+  max-width: min(86vw, 520px);
+  white-space: normal;
+  text-align: center;
+  font-size: 19px;
+  line-height: 1.25;
+  border-radius: 22px;
 }
 
 .mt-callout[hidden] {
@@ -995,6 +1053,48 @@
 .mt-stats .g499-hud-pill {
   padding: 6px 12px;
   font-size: 16px;
+}
+
+/* Debrief fuel note: "Fuel left: N s (star at 30 s)" and what the helper would have left. */
+.mt-fuel-note {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.mt-fuel-note p {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.mt-fuel-note p[hidden] {
+  display: none;
+}
+
+.mt-fuel-note-icon,
+.mt-fuel-note-icon svg,
+.mt-fuel-note-star,
+.mt-fuel-note-star svg {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  color: inherit;
+}
+
+.mt-fuel-note-icon {
+  color: var(--g499-sky);
+}
+
+.mt-fuel-note-star {
+  color: rgba(255, 247, 230, 0.45);
+}
+
+.mt-fuel-note-star.is-on {
+  color: var(--g499-lemon);
 }
 
 .mt-pill-icon,

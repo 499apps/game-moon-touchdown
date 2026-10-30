@@ -1,13 +1,14 @@
 /**
  * Flight HUD: height above the ground, speed down with green / yellow / red bands, a sideways
- * drift arrow, fuel in seconds with the 60 s mark, and a tilt ball. Colours and shapes first,
+ * drift arrow, fuel in seconds with the 60 s mark and a star tick at the fuel-star line (30 s),
+ * and a tilt ball. Colours and shapes first,
  * few words. Writes to the DOM only when a shown value changes.
  *
  * The speed-down bands follow the height: fast is fine high up, slow near the ground. The safe
  * envelope is the hover helper's target speed, so correct helper flight always shows green.
  */
 import { assistTargetVs } from './sim/assist';
-import { MAX_TILT } from './sim/constants';
+import { CALLOUTS, MAX_TILT, STAR_FUEL_SECONDS } from './sim/constants';
 import { moonIcon, type MoonIcon } from './icons';
 
 export interface HudView {
@@ -73,6 +74,15 @@ export function vsBarMax(height: number): number {
   return Math.max(VS_BAR_MAX, 2 * vsLimits(height).yellow);
 }
 
+/** The first fuel call-out (60 s): the plain tick on the fuel bar. */
+export const FUEL_TICK_SECONDS = CALLOUTS[0] ?? 60;
+
+/** Position of a fuel mark on the bar (percent of the full tank, 0..100). */
+export function fuelMarkPercent(seconds: number, fullSeconds: number): number {
+  const full = Math.max(1, Number.isFinite(fullSeconds) ? fullSeconds : 1);
+  return Math.min(1, Math.max(0, seconds) / full) * 100;
+}
+
 function must<T extends Element>(root: ParentNode, selector: string): T {
   const el = root.querySelector<T>(selector);
   if (!el) throw new Error(`hud: missing ${selector}`);
@@ -94,6 +104,7 @@ export class Hud {
   private readonly fuelValue: HTMLElement;
   private readonly fuelFill: HTMLElement;
   private readonly fuelMark: HTMLElement;
+  private readonly fuelStar: HTMLElement;
   private readonly fuelGauge: HTMLElement;
   private readonly tiltDot: SVGCircleElement;
   private readonly tiltGauge: HTMLElement;
@@ -117,6 +128,7 @@ export class Hud {
     this.fuelValue = must<HTMLElement>(root, '#fuel-value');
     this.fuelFill = must<HTMLElement>(root, '#fuel-fill');
     this.fuelMark = must<HTMLElement>(root, '#fuel-mark');
+    this.fuelStar = must<HTMLElement>(root, '#fuel-star');
     this.fuelGauge = must<HTMLElement>(root, '.mt-fuel');
     this.tiltDot = must<SVGCircleElement>(root, '#tilt-dot');
     this.tiltGauge = must<HTMLElement>(root, '.mt-tilt');
@@ -126,6 +138,8 @@ export class Hud {
     for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-icon]'))) {
       el.innerHTML = moonIcon((el.dataset['icon'] ?? 'lander') as MoonIcon);
     }
+    // A filled star marks the fuel-star line (30 s) on the bar.
+    this.fuelStar.innerHTML = moonIcon('star', 'g499-icon-svg', true);
   }
 
   setVisible(on: boolean): void {
@@ -172,9 +186,15 @@ export class Hud {
     const fs = Math.max(0, v.fuelSeconds);
     const full = Math.max(1, v.fullFuelSeconds);
     this.put('fuel', String(Math.ceil(fs)), (s) => (this.fuelValue.textContent = s));
-    this.put('fuel-fill', ((Math.min(1, fs / full) * 100).toFixed(1)), (s) => (this.fuelFill.style.width = `${s}%`));
-    this.put('fuel-mark', ((Math.min(1, 60 / full) * 100).toFixed(1)), (s) => (this.fuelMark.style.left = `${s}%`));
-    this.put('fuel-band', fs > 60 ? 'good' : fs > 30 ? 'warn' : 'bad', (s) => (this.fuelGauge.dataset['band'] = s));
+    this.put('fuel-fill', fuelMarkPercent(fs, full).toFixed(1), (s) => (this.fuelFill.style.width = `${s}%`));
+    this.put('fuel-mark', fuelMarkPercent(FUEL_TICK_SECONDS, full).toFixed(1), (s) => (this.fuelMark.style.left = `${s}%`));
+    this.put('fuel-star', fuelMarkPercent(STAR_FUEL_SECONDS, full).toFixed(1), (s) => (this.fuelStar.style.left = `${s}%`));
+    // Below the star line the band is red and the star tick fades: the fuel star is gone.
+    this.put(
+      'fuel-band',
+      fs > FUEL_TICK_SECONDS ? 'good' : fs >= STAR_FUEL_SECONDS ? 'warn' : 'bad',
+      (s) => (this.fuelGauge.dataset['band'] = s),
+    );
 
     const tx = (v.tiltX / MAX_TILT) * 13;
     const tz = (v.tiltZ / MAX_TILT) * 13;

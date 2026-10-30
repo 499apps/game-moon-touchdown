@@ -37,9 +37,9 @@ import {
 import { MoonScene, SUN, type ScenePhase, type ScreenPoint } from './scene/moonScene';
 import { bakeSunShadow } from './scene/shade';
 import type { TerrainSource } from './scene/terrainView';
-import { DT, LEG_DROP } from './sim/constants';
-import { Flight, type FlightEvent, type FlightResult, type PilotInput } from './sim/flight';
-import { BUMP_TEXT } from './sim/judge';
+import { DT, LEG_DROP, LOW_FUEL_PROMPT_SECONDS } from './sim/constants';
+import { Flight, flyHelper, type FlightEvent, type FlightResult, type PilotInput } from './sim/flight';
+import { BUMP_TEXT, FUEL_STAR_TIP, fuelLeftText, fuelOutAdvice, helperLeftText } from './sim/judge';
 import { createLander, hoverThrottle, type LanderState } from './sim/lander';
 import { predictTouchdown, type Prediction } from './sim/predictor';
 import {
@@ -59,8 +59,9 @@ type Phase = ScenePhase;
 
 /** Seconds after touchdown before the debrief card slides in (the dust settles first). */
 const DEBRIEF_DELAY = 1.6;
-/** Seconds a fuel call-out stays on screen. */
+/** Seconds a fuel call-out stays on screen, and the longer low-fuel prompt. */
 const CALLOUT_TIME = 2.6;
+const PROMPT_TIME = 4.5;
 /** Seconds between touchdown predictions, and how far ahead they look (s). */
 const PREDICT_EVERY = 0.1;
 const PREDICT_HORIZON = 110;
@@ -103,6 +104,10 @@ const statHs = must<HTMLElement>('#stat-hs');
 const statDist = must<HTMLElement>('#stat-dist');
 const statFuel = must<HTMLElement>('#stat-fuel');
 const statTime = must<HTMLElement>('#stat-time');
+const fuelLeftEl = must<HTMLElement>('#fuel-left-text');
+const fuelNoteStar = must<HTMLElement>('#fuel-note-star');
+const fuelHelperEl = must<HTMLElement>('#fuel-helper');
+const fuelHelperText = must<HTMLElement>('#fuel-helper-text');
 const chartEl = must<HTMLCanvasElement>('#chart');
 const factSite = must<HTMLElement>('#fact-site');
 const factGravity = must<HTMLElement>('#fact-gravity');
@@ -156,6 +161,10 @@ let helpedRun = false;
 let steerHinted = false;
 /** The Help button pulsed once on the first ready screen of this page. */
 let helpPulsed = false;
+/** The one-time "Low fuel: tap Help" prompt already showed in this run. */
+let lowFuelPrompted = false;
+/** Height (m) where the tank ran dry in this run, or null. */
+let fuelOutHeight: number | null = null;
 /** Edge arrows: the ring and the marker are inside the usable frame. */
 let ringOnScreen = false;
 let markerOnScreen = false;
@@ -313,6 +322,8 @@ function prepareRun(site: SiteInfo, src: TerrainSource): void {
   calloutLeft = 0;
   helpedRun = false;
   steerHinted = false;
+  lowFuelPrompted = false;
+  fuelOutHeight = null;
   edgeRing.pulse(false);
   tiltPadEl.classList.remove('is-pulse');
   // The first ready screen of a new player: the Help button pulses once.
@@ -384,10 +395,11 @@ function setTouch(on: boolean): void {
 function handleEvents(events: FlightEvent[]): void {
   for (const e of events) {
     if (e.type === 'callout') {
-      showCallout(`${e.seconds} seconds of fuel`, e.seconds <= 30 ? 'bad' : 'warn');
+      showCallout(`${e.seconds} seconds of fuel`, e.seconds <= 30 ? 'bad' : 'warn', { icon: 'fuel' });
       sounds.callout(e.seconds);
     } else if (e.type === 'fuel-out') {
-      showCallout('Out of fuel', 'bad');
+      fuelOutHeight = flight ? flight.altitude : 0;
+      showCallout('Out of fuel', 'bad', { icon: 'fuel' });
       sounds.fuelOut();
     } else {
       onTouchdown(e.result);
@@ -414,11 +426,32 @@ function onTouchdown(r: FlightResult): void {
   updateUi();
 }
 
-function showCallout(text: string, band: 'warn' | 'bad'): void {
-  calloutEl.textContent = text;
+function showCallout(text: string, band: 'warn' | 'bad', opts: { icon?: MoonIcon; prompt?: boolean } = {}): void {
+  calloutEl.textContent = '';
+  if (opts.icon) {
+    const icon = document.createElement('span');
+    icon.className = 'mt-callout-icon';
+    icon.innerHTML = moonIcon(opts.icon);
+    calloutEl.append(icon);
+  }
+  calloutEl.append(document.createTextNode(text));
+  calloutEl.classList.toggle('is-prompt', opts.prompt === true);
   calloutEl.dataset['band'] = band;
   calloutEl.hidden = false;
-  calloutLeft = CALLOUT_TIME;
+  calloutLeft = opts.prompt ? PROMPT_TIME : CALLOUT_TIME;
+}
+
+/**
+ * A manual pilot low on fuel: one gentle prompt per run, and the Help button pulses. The helper
+ * can take over at any time; the 60 s and 30 s call-outs still play as before.
+ */
+function promptLowFuel(): void {
+  lowFuelPrompted = true;
+  showCallout('Low fuel: tap Help to land safely', 'warn', { icon: 'assist', prompt: true });
+  assistBtn.classList.remove('is-pulse');
+  // Restart the pulse animation (it may have played on the ready screen): force a layout.
+  assistBtn.getBoundingClientRect();
+  assistBtn.classList.add('is-pulse');
 }
 
 // ---------- Overlays ----------
@@ -494,7 +527,12 @@ function showDebrief(): void {
   outcomeTitle.textContent = soft ? (r.stars.stars === 3 ? 'Perfect touchdown!' : 'Soft touchdown!') : 'Bumpy landing';
   let reason = '';
   let reasonIcon: MoonIcon | null = null;
-  if (!soft) {
+  if (fuelOutHeight !== null && !r.stars.fuel) {
+    // The tank ran dry: explain why and give one tip, never blame.
+    const advice = fuelOutAdvice(fuelOutHeight);
+    reason = `${advice.text} ${advice.tip}`;
+    reasonIcon = 'fuel';
+  } else if (!soft) {
     reason = r.verdict.reasons.map((k) => BUMP_TEXT[k]).slice(0, 2).join(' ');
   } else if (!r.stars.close) {
     // Say who steers: the helper flies the engine only, the child tilts toward the ring.
@@ -503,7 +541,7 @@ function showDebrief(): void {
       : 'Land inside the green ring for another star.';
     reasonIcon = helpedRun ? 'tilt' : 'target';
   } else if (!r.stars.fuel) {
-    reason = 'Keep 30 seconds of fuel for another star.';
+    reason = helpedRun ? 'The helper is careful, so it uses a lot of fuel. Fly the engine yourself to keep 30 s for the star.' : FUEL_STAR_TIP;
     reasonIcon = 'fuel';
   }
   outcomeReason.textContent = '';
@@ -522,6 +560,7 @@ function showDebrief(): void {
   statDist.textContent = `${Math.round(r.distance)} m`;
   statFuel.textContent = `${Math.floor(r.touchdown.fuelSeconds)} s`;
   statTime.textContent = `${Math.round(r.touchdown.time)} s`;
+  showFuelNote(flight, r);
   factMap.innerHTML = moonMapSvg(site.lat, site.lon, 'mt-fact-map-svg', `Where ${site.name} is on the Moon`);
   factSite.textContent = factFor(site, runCount - 1);
   factReal.textContent = REAL_GROUND_FACT;
@@ -534,6 +573,24 @@ function showDebrief(): void {
   debriefEl.hidden = false;
   drawDescentChart(chartEl, flight.trace);
   retryBtn.focus({ preventScroll: true });
+}
+
+/**
+ * "Fuel left: N s (star at 30 s)" with a star that fills when earned. When a star was missed on a
+ * run the child flew, also "Helper would have left ~M s": a what-if helper run from the same
+ * start on the same ground, so the child sees the number to beat.
+ */
+function showFuelNote(f: Flight, r: FlightResult): void {
+  fuelLeftEl.textContent = fuelLeftText(r.touchdown.fuelSeconds);
+  fuelNoteStar.innerHTML = moonIcon('star', 'g499-icon-svg', r.stars.fuel);
+  fuelNoteStar.classList.toggle('is-on', r.stars.fuel);
+  let helperText = '';
+  if (!helpedRun && (!r.stars.fuel || !r.stars.close)) {
+    const whatIf = flyHelper(f.terrain, f.start).flight.result;
+    if (whatIf && whatIf.verdict.outcome === 'soft') helperText = helperLeftText(whatIf.touchdown.fuelSeconds);
+  }
+  fuelHelperText.textContent = helperText;
+  fuelHelperEl.hidden = helperText === '';
 }
 
 // ---------- Rail items with game icons ----------
@@ -622,6 +679,9 @@ function update(dt: number): void {
     while (stepCarry >= DT - 1e-9 && f.phase === 'flying') {
       stepCarry -= DT;
       handleEvents(f.step(lastInput));
+    }
+    if (phase === 'flying' && !assist && !lowFuelPrompted && f.fuelSeconds > 0 && f.fuelSeconds < LOW_FUEL_PROMPT_SECONDS) {
+      promptLowFuel();
     }
     if (phase === 'flying') {
       predictClock += dt;

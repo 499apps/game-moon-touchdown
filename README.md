@@ -8,8 +8,9 @@ It plays at `https://499apps.com/games/moon-touchdown/`.
 - Use the engine and tilt to slow down and stop the sideways drift. Touch down under 2 m/s.
 - The speed-down gauge follows the height: fast is fine high up, slow near the ground.
 - Edge arrows point to the target ring and to the predicted touchdown when they are out of view.
-- Fuel counts in seconds of hovering. Chimes sound at 60 s and 30 s. The first crew heard the "30 seconds" fuel call just before they touched down. On the hard sites, fuel is tight.
-- Get up to three stars: a soft touchdown, inside the green ring, and 30 s of fuel left. A soft touchdown opens the next site.
+- Fuel counts in seconds of hovering. Chimes sound at 60 s and 30 s. The first crew heard the "30 seconds" fuel call just before they touched down.
+- Get up to three stars: a soft touchdown, inside the green ring, and 30 s of fuel left (the star tick on the fuel bar). Help always lands safely but uses too much fuel for the fuel star. To earn it, fly the engine yourself: fall faster up high, then brake later and harder. A soft touchdown opens the next site.
+- Low on fuel when you fly by hand? A prompt says "Low fuel: tap Help to land safely". The debrief shows your fuel left and what Help would have left.
 - After each landing, the debrief shows your descent chart, your touchdown numbers, a Moon map with the site, a fact about the site, a "you vs the real crew" line and a "Talk about it" question for the family.
 - The **Help** button turns on the hover helper. It flies the engine gently and stops the drift. The child steers to the ring.
   New players start with Help on until they land softly once without it. Moving the throttle takes over the engine.
