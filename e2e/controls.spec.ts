@@ -23,6 +23,9 @@ interface ControlsState {
   tiltZ: number;
   landerTilt: { x: number; z: number; deg: number } | null;
   toast: string | null;
+  solo: boolean;
+  rcsPuffs: number;
+  haloThrottle: number;
 }
 
 interface Snap {
@@ -52,6 +55,25 @@ async function waitSim(page: Page, from: ControlsState, secs: number): Promise<S
   return snap(page);
 }
 
+/** Wait for n rendered frames (requestAnimationFrame), then read the state. Returns the frame times (ms) too. */
+async function afterFrames(page: Page, n: number): Promise<{ frames: number[]; snap: Snap }> {
+  const frames = await page.evaluate(
+    (count) =>
+      new Promise<number[]>((res) => {
+        const t0 = performance.now();
+        const out: number[] = [];
+        const tick = (): void => {
+          out.push(Math.round(performance.now() - t0));
+          if (out.length < count) requestAnimationFrame(tick);
+          else res(out);
+        };
+        requestAnimationFrame(tick);
+      }),
+    n,
+  );
+  return { frames, snap: await snap(page) };
+}
+
 /** Mean vertical acceleration (m/s^2) between two samples, by sim time. */
 function accel(a: ControlsState, b: ControlsState): number {
   return (b.vs - a.vs) / Math.max(1e-3, b.time - a.time);
@@ -73,6 +95,12 @@ test.describe('moon-touchdown keyboard controls', () => {
     // Keyboard (touch pad off): the key tip with key caps.
     await expect(page.locator('#ready-tip-keys')).toBeVisible();
     await expect(page.locator('#ready-tip-keys kbd')).toHaveCount(4);
+    // A new player: Help is armed on the ready screen, and the chip and the Help button say so (R3 finding 3).
+    const ready = (await snap(page)).s;
+    const who = ready.solo ? 'you' : 'help';
+    await expect(page.locator('#input-chip')).toHaveAttribute('data-engine', who);
+    await expect(page.locator('#assist-btn')).toHaveAttribute('aria-pressed', ready.solo ? 'false' : 'true');
+    expect(ready.assist).toBe(!ready.solo);
 
     // 1. Control run: Space starts with Help on; no input. Help idles the engine high up.
     await page.keyboard.press('Space');
@@ -102,24 +130,16 @@ test.describe('moon-touchdown keyboard controls', () => {
     expect(wall, 'key press and read-back did not hang').toBeLessThan(1000);
     expect(w0.s.assist, 'Help off at once').toBe(false);
     // The throttle is applied on the next animation frame after the key event (one frame, ~16 ms on a GPU;
-    // slower under software GL here), so poll within the response budget instead of reading synchronously.
-    const frames = await page.evaluate(
-      () =>
-        new Promise<number[]>((res) => {
-          const t0 = performance.now();
-          const out: number[] = [];
-          const tick = (): void => {
-            out.push(Math.round(performance.now() - t0));
-            if (out.length < 3) requestAnimationFrame(tick);
-            else res(out);
-          };
-          requestAnimationFrame(tick);
-        }),
-    );
-    const wf = (await snap(page)).s;
+    // slower under software GL here), so wait 3 rendered frames instead of reading synchronously.
+    const { frames, snap: wfSnap } = await afterFrames(page, 3);
+    const wf = wfSnap.s;
     testInfo.annotations.push({ type: 'frames-ms', description: frames.join(',') + ' throttle ' + wf.throttle });
-    console.log('frames after W (ms):', frames.join(','), 'throttle', wf.throttle);
+    console.log('frames after W (ms):', frames.join(','), 'throttle', wf.throttle, 'halo', wf.haloThrottle);
     expect(wf.throttle, 'engine lit within 3 rendered frames of the key press').toBeGreaterThan(0);
+    // On the lander itself, high up: the halo turns warm and grows with the engine (R3 finding 1).
+    expect(wf.haloThrottle, 'the halo shows the engine within 3 rendered frames of W').toBeGreaterThan(0);
+    // The toast is fully shown in test frames too (R3 finding 4).
+    expect(await page.locator('#toast').evaluate((el) => getComputedStyle(el).opacity), 'toast opacity').toBe('1');
     expect(w0.s.lastInputSource).toBe('keyboard');
     expect(w0.s.lastInputAgeMs ?? Infinity).toBeLessThan(150);
     expect(w0.s.heldKeys).toContain('KeyW');
@@ -146,6 +166,10 @@ test.describe('moon-touchdown keyboard controls', () => {
     const l0 = await snap(page);
     expect(l0.s.heldKeys).toContain('ArrowLeft');
     expect(l0.s.litKeys).toContain('left');
+    // On the lander itself: attitude-thruster puffs within 3 rendered frames (R3 finding 1).
+    const lf = await afterFrames(page, 3);
+    console.log('frames after ArrowLeft (ms):', lf.frames.join(','), 'puffs', lf.snap.s.rcsPuffs);
+    expect(lf.snap.s.rcsPuffs, 'thruster puffs within 3 rendered frames of ArrowLeft').toBeGreaterThan(0);
     const l1 = await waitSim(page, l0.s, 0.3);
     const cueOn = await page.locator('#tilt-cmd').evaluate((el) => el.classList.contains('is-on'));
     await page.keyboard.up('ArrowLeft');

@@ -2,12 +2,17 @@
  * Touchdown predictor: integrates the current state forward with the pilot input held constant
  * (the hover assist keeps working inside the prediction, the same as in flight) until a footpad
  * meets the ground. Uses a coarser step than the flight and interpolates the contact moment.
+ *
+ * While the player holds a key, the pad or a stick, the input is a short press, not a plan: with
+ * `fade` set, a held tilt fades to the helper's lean and a held throttle to hover over `fade`
+ * seconds (fadeTilt / fadeThrottle say which input is live). Without it the input is held as is
+ * (the no-input case, checked against the full sim).
  */
-import { G_MOON } from './constants';
+import { G_MOON, MIN_THROTTLE } from './constants';
 import { resolveCommand, heightAboveGround, type PilotInput } from './flight';
 import { judgeTouchdown, type Outcome } from './judge';
-import { cloneLander, stepLander, tiltAngle, type LanderState, type Vec3 } from './lander';
-import type { AssistMemory } from './assist';
+import { clamp, cloneLander, hoverThrottle, stepLander, tiltAngle, type LanderState, type Vec3 } from './lander';
+import { assistTilt, type AssistMemory } from './assist';
 import type { Terrain } from './terrain';
 
 export interface PredictOptions {
@@ -18,6 +23,40 @@ export interface PredictOptions {
   /** Keep a trail point every N steps. Default 3. */
   trailEvery?: number;
   g?: number;
+  /** Seconds over which live player input fades (0 or unset: held as is). */
+  fade?: number;
+  /** The tilt input is live: it fades to the helper's lean. */
+  fadeTilt?: boolean;
+  /** The engine input is live (manual flight): it fades to the hover throttle. */
+  fadeThrottle?: boolean;
+}
+
+/** Default fade (s) for live input, about the length of a short key press and its answer. */
+export const LIVE_INPUT_FADE = 1.5;
+
+/** The pilot input `k` (0..1) of the way through the fade. */
+export function fadeInput(
+  input: PilotInput,
+  s: LanderState,
+  k: number,
+  o: { tilt: boolean; throttle: boolean },
+  g = G_MOON,
+): PilotInput {
+  const w = clamp(k, 0, 1);
+  if (w <= 0 || (!o.tilt && !o.throttle)) return input;
+  const out: PilotInput = { ...input };
+  if (o.tilt) {
+    const lean = assistTilt(s);
+    out.tiltX = lerp(input.tiltX, lean.x, w);
+    out.tiltZ = lerp(input.tiltZ, lean.z, w);
+  }
+  if (o.throttle && !input.assist) {
+    const hover = clamp(hoverThrottle(s, g) / Math.max(0.5, Math.cos(tiltAngle(s))), MIN_THROTTLE, 1);
+    out.throttle = lerp(input.throttle, hover, w);
+    // Manual flight has no helper lean: the faded tilt is the command.
+    if (o.tilt) out.tiltActive = true;
+  }
+  return out;
 }
 
 export interface Prediction {
@@ -60,8 +99,12 @@ export function predictTouchdown(
   const t0 = s.t;
   const trail: Vec3[] = [{ ...s.pos }];
   const steps = Math.ceil(horizon / dt);
+  const fade = o.fade ?? 0;
+  const fadeWhat = { tilt: o.fadeTilt === true, throttle: o.fadeThrottle === true };
+  const fading = fade > 0 && (fadeWhat.tilt || fadeWhat.throttle);
   for (let k = 1; k <= steps; k++) {
-    const cmd = resolveCommand(s, input, h, mem, dt, g);
+    const now = fading ? fadeInput(input, s, ((k - 1) * dt) / fade, fadeWhat, g) : input;
+    const cmd = resolveCommand(s, now, h, mem, dt, g);
     const next = stepLander(s, cmd, dt, g);
     const nh = heightAboveGround(next, terrain);
     if (nh <= 0) {

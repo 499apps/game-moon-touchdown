@@ -13,9 +13,11 @@ font stack.
 | --- | --- | --- |
 | NASA Lunar Reconnaissance Orbiter, Lunar Orbiter Laser Altimeter (LOLA) gridded elevation, LDEM_512 (512 px/deg, about 59 m/px), PDS bundle urn:nasa:pds:lro_lola_rdr (DOI 10.17189/tnyt-7007), Smith, D.E. and Neumann, G.A. | Public domain (PDS archive data; NASA science data is CC0 unless marked otherwise) | Terrain heights in `public/data/terrain/*.bin` |
 
-Processing and sources are in `scripts/terrain/SOURCE.md`: bilinear resample to a 256 x 256 grid at
-60 m spacing per site, a light Gaussian across columns to soften track striping, heights relative to
-the site centre in 0.5 m units. No NASA logos or endorsement are implied.
+Processing and sources are in `scripts/terrain/SOURCE.md` (script `scripts/terrain/fetch.py`):
+bilinear resample to a 256 x 256 grid at 60 m spacing per site, a 1D Gaussian (sigma 1.6 grid px)
+across columns to soften track striping, heights relative to the site centre in 0.5 m units. A
+re-run of the script to confirm the committed files is pending (see `SOURCE.md`). No NASA logos or
+endorsement are implied.
 
 ## Bundled into the game
 

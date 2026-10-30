@@ -231,7 +231,8 @@ export class Hud {
 
     const fs = Math.max(0, v.fuelSeconds);
     const full = Math.max(1, v.fullFuelSeconds);
-    this.put('fuel', String(Math.ceil(fs)), (s) => (this.fuelValue.textContent = s));
+    // Rounded down, the same as the debrief and the star (>= 30 s): "30" always means the star holds.
+    this.put('fuel', String(Math.floor(fs)), (s) => (this.fuelValue.textContent = s));
     this.put('fuel-fill', fuelMarkPercent(fs, full).toFixed(1), (s) => (this.fuelFill.style.width = `${s}%`));
     this.put('fuel-mark', fuelMarkPercent(FUEL_TICK_SECONDS, full).toFixed(1), (s) => (this.fuelMark.style.left = `${s}%`));
     this.put('fuel-star', fuelMarkPercent(STAR_FUEL_SECONDS, full).toFixed(1), (s) => (this.fuelStar.style.left = `${s}%`));

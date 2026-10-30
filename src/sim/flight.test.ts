@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { createRng } from '../kit/prng';
 import { LEG_DROP, LIMITS } from './constants';
-import { assistFuelNeed, assistTargetVs, createAssistMemory } from './assist';
+import { assistFuelNeed, assistTargetVs, assistTilt, createAssistMemory } from './assist';
 import { Flight, IDLE_INPUT, flyHelper, runScript, type FlightEvent, type PilotInput, type ScriptStep } from './flight';
 import { hoverThrottle } from './lander';
-import { predictTouchdown } from './predictor';
+import { LIVE_INPUT_FADE, fadeInput, predictTouchdown } from './predictor';
 import { SITES, startConditions } from './sites';
 import { Terrain } from './terrain';
 
@@ -239,6 +239,52 @@ describe('predictor', () => {
     const f = new Flight(FLAT, { pos: { x: 0, y: 200, z: 0 }, vel: { x: 0, y: 5, z: 0 }, fuel: 900 });
     const p = predictTouchdown(FLAT, f.state, { ...IDLE_INPUT, throttle: 0.5 }, createAssistMemory(), { horizon: 30 });
     expect(p).toBeNull();
+  });
+
+  it('fades a held climb to hover while the engine input is live (R3 finding 9)', () => {
+    const f = new Flight(FLAT, { pos: { x: 0, y: 300, z: 0 }, vel: { x: 0, y: -8, z: 0 }, fuel: 900 });
+    const climb: PilotInput = { ...IDLE_INPUT, throttle: 0.6, tiltActive: true };
+    // Held as is (no live input), 60% climbs away: no touchdown.
+    expect(predictTouchdown(FLAT, f.state, climb, createAssistMemory(), { horizon: 110 })).toBeNull();
+    // A W press that fades to hover over 1.5 s: the lander still comes down.
+    const p = predictTouchdown(FLAT, f.state, climb, createAssistMemory(), {
+      horizon: 110,
+      fade: LIVE_INPUT_FADE,
+      fadeThrottle: true,
+    });
+    expect(p).not.toBeNull();
+    expect(p?.t ?? 0).toBeGreaterThan(20);
+  });
+
+  it('fades a held lean to the helper lean while the tilt input is live (R3 finding 9)', () => {
+    const f = new Flight(FLAT, { pos: { x: 0, y: 300, z: 0 }, vel: { x: 0, y: -8, z: 0 }, fuel: 900 });
+    const lean: PilotInput = { ...ASSIST, tiltX: 0.3, tiltActive: true };
+    const held = predictTouchdown(FLAT, f.state, lean, f.assistMemory(), { horizon: 110 });
+    const faded = predictTouchdown(FLAT, f.state, lean, f.assistMemory(), { horizon: 110, fade: LIVE_INPUT_FADE, fadeTilt: true });
+    expect(held).not.toBeNull();
+    expect(faded).not.toBeNull();
+    if (!held || !faded) return;
+    expect(held.x).toBeGreaterThan(20);
+    expect(Math.abs(faded.x)).toBeLessThan(held.x / 3);
+    // The helper still lands it softly once the press is over: the marker is not red.
+    expect(faded.outcome).toBe('soft');
+  });
+
+  it('fadeInput: no change at the start, the helper lean and hover at the end, Help keeps the engine', () => {
+    const f = new Flight(FLAT, { pos: { x: 0, y: 300, z: 0 }, vel: { x: 3, y: -8, z: -2 }, fuel: 900 });
+    const s = f.state;
+    const manual: PilotInput = { ...IDLE_INPUT, throttle: 0.7, tiltX: 0.4, tiltZ: -0.2, tiltActive: true };
+    expect(fadeInput(manual, s, 0, { tilt: true, throttle: true })).toEqual(manual);
+    const end = fadeInput(manual, s, 1, { tilt: true, throttle: true });
+    const lean = assistTilt(s);
+    expect(end.tiltX).toBeCloseTo(lean.x, 9);
+    expect(end.tiltZ).toBeCloseTo(lean.z, 9);
+    expect(end.throttle).toBeCloseTo(hoverThrottle(s), 6);
+    const helped = fadeInput({ ...ASSIST, tiltX: 0.4, tiltActive: true }, s, 1, { tilt: true, throttle: true });
+    expect(helped.assist).toBe(true);
+    expect(helped.throttle).toBe(0);
+    // Only the live input fades.
+    expect(fadeInput(manual, s, 1, { tilt: false, throttle: true }).tiltX).toBe(0.4);
   });
 
   it('keeps the assist working inside the prediction', () => {

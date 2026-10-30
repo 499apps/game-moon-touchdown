@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { candyMaterial, roundedBox } from '../kit/scene-helpers';
 import { palette } from '../kit/theme';
 import { LEG_DROP, LEG_SPREAD } from '../sim/constants';
+import { THRUSTERS } from './rcsPuffs';
 import { makeFoilNormal } from './textures';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -111,13 +112,11 @@ export class LanderModel {
     dish.rotation.set(-0.5, 0, -0.6);
     this.body.add(mast, dish);
 
-    // Corner thrusters.
-    for (const sx of [-1, 1]) {
-      for (const sz of [-1, 1]) {
-        const quad = new THREE.Mesh(roundedBox(0.3, 0.3, 0.3, 0.08, 2), lemon);
-        quad.position.set(sx * 1.32, 1.55, sz * 1.15);
-        this.body.add(quad);
-      }
+    // Corner thrusters (the attitude-thruster puffs start here: src/scene/rcsPuffs.ts).
+    for (const t of THRUSTERS) {
+      const quad = new THREE.Mesh(roundedBox(0.3, 0.3, 0.3, 0.08, 2), lemon);
+      quad.position.set(t.x, t.y, t.z);
+      this.body.add(quad);
     }
 
     // Engine bell and its glow.

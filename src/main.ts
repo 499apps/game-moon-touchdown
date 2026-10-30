@@ -64,7 +64,7 @@ import {
   helperLeftText,
 } from './sim/judge';
 import { createLander, hoverThrottle, type LanderState } from './sim/lander';
-import { predictTouchdown, type Prediction } from './sim/predictor';
+import { LIVE_INPUT_FADE, predictTouchdown, type Prediction } from './sim/predictor';
 import {
   GRAVITY_FACT,
   GRID,
@@ -100,8 +100,10 @@ const PHONE_WIDTH = 720;
 const PHONE_SHORT = 500;
 /** Default HUD band (px) before the HUD is measured. */
 const DEFAULT_HUD_BAND = 64;
-/** Seconds the "You fly now" / "Help flies the engine" toast stays. */
-const TOAST_TIME = 1.8;
+/** Seconds the "You fly now" / "Help flies the engine" toast stays (long enough for a young reader). */
+const TOAST_TIME = 2.5;
+/** The marker edge arrow hides when its clamped point is this close (px) to the visible marker. */
+const MARKER_ARROW_NEAR = 40;
 /** Engine keys: a press of one while Help flies hands the engine over on the key event itself. */
 const ENGINE_CODES: ReadonlySet<string> = new Set([...KEYS.throttleUp, ...KEYS.throttleDown]);
 
@@ -154,6 +156,7 @@ const readyTipHelp = must<HTMLElement>('#ready-tip-help');
 const readyTipSolo = must<HTMLElement>('#ready-tip-solo');
 const readyTipKeys = must<HTMLElement>('#ready-tip-keys');
 const tiltPadEl = must<HTMLElement>('#tilt-pad');
+const throttleEl = must<HTMLElement>('#throttle');
 const edgeRing = new EdgeArrow(must<HTMLElement>('#edge-ring'));
 const edgeMarker = new EdgeArrow(must<HTMLElement>('#edge-marker'));
 const retryBtn = must<HTMLButtonElement>('#retry');
@@ -213,6 +216,8 @@ let markerOnScreen = false;
 let landerOnScreen = false;
 const landerPx = { x: 0, y: 0 };
 let stageBox = { left: 0, top: 0, width: 1, height: 1 };
+/** Page boxes of the slider, the pad and the Help button while they show (they hide what is under them). */
+let coverBoxes: DOMRect[] = [];
 /** Bottom of the HUD band, in px from the stage top (0 while the HUD is hidden). */
 let hudBottom = 0;
 const ringPoint: ScreenPoint = { x: 0, y: 0, behind: false };
@@ -314,7 +319,7 @@ const stage = createStage({
 });
 
 const touch = new TouchControls({
-  slider: must<HTMLElement>('#throttle'),
+  slider: throttleEl,
   sliderFill: must<HTMLElement>('#throttle-fill'),
   sliderKnob: must<HTMLElement>('#throttle-knob'),
   sliderHover: must<HTMLElement>('#throttle-hover'),
@@ -403,6 +408,12 @@ function prepareRun(site: SiteInfo, src: TerrainSource): void {
   fuelOutHelped = false;
   manualIdle = 0;
   helpOffInFlight = false;
+  // New players: Help is armed on the ready screen (no toast yet), so the chip, the Help button
+  // and the tip ("Help is on, slide to take over") agree. Engine input at ready still flies by
+  // hand: the flight starts and Help hands the engine over on that frame ("You fly now").
+  assist = !progress.solo;
+  renderAssist();
+  renderChip();
   hideToast();
   edgeRing.pulse(false);
   tiltPadEl.classList.remove('is-pulse');
@@ -428,6 +439,8 @@ function startFlight(): void {
   phase = 'flying';
   assistBtn.classList.remove('is-pulse');
   sounds.start();
+  // Help armed on the ready screen flies the engine from now on: say so once.
+  if (assist) showToast('help');
   updateUi();
 }
 
@@ -474,12 +487,29 @@ function showToast(kind: Toast): void {
   toastText.textContent = TOAST_TEXT[kind];
   toastEl.hidden = false;
   toastLeft = TOAST_TIME;
+  stackMessages();
 }
 
 function hideToast(): void {
   toastEl.hidden = true;
   toastNow = null;
   toastLeft = 0;
+  stackMessages();
+}
+
+function hideCallout(): void {
+  calloutEl.hidden = true;
+  stackMessages();
+}
+
+/**
+ * The call-out and the toast both sit just below the HUD band (--mt-hud-bottom). When both show,
+ * the toast moves one row down, below the call-out (--mt-callout-h), so they never overlap.
+ */
+function stackMessages(): void {
+  const both = !calloutEl.hidden && !toastEl.hidden;
+  appEl.classList.toggle('mt-stack', both);
+  if (both) appEl.style.setProperty('--mt-callout-h', `${Math.ceil(calloutEl.offsetHeight)}px`);
 }
 
 /**
@@ -596,6 +626,7 @@ function showCallout(
   calloutEl.dataset['band'] = band;
   calloutEl.hidden = false;
   calloutLeft = opts.prompt ? PROMPT_TIME : CALLOUT_TIME;
+  stackMessages();
 }
 
 /** The helper's fuel need from here (hover-seconds, assistFuelNeed). */
@@ -850,18 +881,19 @@ function updateUi(): void {
   // The pause card waits under the site picker and the help card.
   pauseOverlay.hidden = !paused || cardOpen;
   const showTouch = touchOn && flyingish && !paused;
-  must<HTMLElement>('#throttle').hidden = !showTouch;
-  must<HTMLElement>('#tilt-pad').hidden = !showTouch;
+  throttleEl.hidden = !showTouch;
+  tiltPadEl.hidden = !showTouch;
   appEl.classList.toggle('mt-touch-on', showTouch);
   assistBtn.hidden = !flyingish || paused || cardOpen;
   if (phase !== 'landed') debriefEl.hidden = true;
   if (!flyingish) {
-    calloutEl.hidden = true;
+    hideCallout();
     hideToast();
   }
   renderAssist();
   renderChip();
   shell.menu.refresh();
+  measureCovers();
   stage.requestRender();
 }
 
@@ -917,7 +949,15 @@ function update(dt: number): void {
       predictClock += dt;
       if (predictClock >= PREDICT_EVERY - 1e-9) {
         predictClock = 0;
-        prediction = predictTouchdown(f.terrain, f.state, lastInput, f.assistMemory(), { horizon: PREDICT_HORIZON });
+        // While a key, the pad or a stick is held, the input is a short press, not a plan: the
+        // prediction fades it to the helper's lean and to hover over 1.5 s, so steering toward the
+        // ring does not throw the marker far away in red. With no input it holds the input as is.
+        prediction = predictTouchdown(f.terrain, f.state, lastInput, f.assistMemory(), {
+          horizon: PREDICT_HORIZON,
+          fade: LIVE_INPUT_FADE,
+          fadeTilt: activity.tilt,
+          fadeThrottle: activity.engine && !assist,
+        });
       }
     }
   }
@@ -927,7 +967,7 @@ function update(dt: number): void {
   }
   if (calloutLeft > 0 && !paused) {
     calloutLeft -= dt;
-    if (calloutLeft <= 0) calloutEl.hidden = true;
+    if (calloutLeft <= 0) hideCallout();
   }
   if (toastLeft > 0 && !paused) {
     toastLeft -= dt;
@@ -979,6 +1019,10 @@ if (stage.kit) {
         landedFor,
         outcome: flight?.result?.verdict.outcome ?? null,
         paused,
+        // The shaped command, not the lagged sim tilt: the thruster puffs answer on this frame.
+        cmdTiltX: phase === 'flying' ? lastInput.tiltX : 0,
+        cmdTiltZ: phase === 'flying' ? lastInput.tiltZ : 0,
+        tiltHeld: phase === 'flying' && activity.tilt,
       });
       updateEdges(s);
     },
@@ -1010,6 +1054,7 @@ function measureStage(): void {
   const r = stageHost.getBoundingClientRect();
   stageBox = { left: r.left, top: r.top, width: Math.max(1, r.width), height: Math.max(1, r.height) };
   measureHud();
+  measureCovers();
 }
 
 /**
@@ -1024,7 +1069,24 @@ function measureHud(): void {
     if (t.height > 0) bottom = Math.max(bottom, t.bottom - stageBox.top);
   }
   hudBottom = Math.max(0, bottom);
+  // The call-out and the toast sit just below the HUD band, which wraps to 2 or 3 rows on phones.
+  // (The stage starts at the top of .game-app, so the band is the same in both boxes.)
+  if (hudBottom > 0) appEl.style.setProperty('--mt-hud-bottom', `${Math.ceil(hudBottom)}px`);
+  stackMessages();
   scene?.setFrameInsets(hudBottom > 0 ? hudBottom : DEFAULT_HUD_BAND, cameraBottom());
+}
+
+function measureCovers(): void {
+  coverBoxes = [];
+  for (const el of [throttleEl, tiltPadEl, assistBtn]) {
+    if (el.hidden) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) coverBoxes.push(r);
+  }
+}
+
+function underCover(x: number, y: number): boolean {
+  return coverBoxes.some((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom);
 }
 
 /** Controls band for the flight camera (px): the touch controls fill the bottom 30% in portrait. */
@@ -1085,8 +1147,17 @@ function updateEdges(s: MoonScene): void {
   }
   s.project(p.x, s.groundAt(p.x, p.z) + 0.5, p.z, markerPoint);
   const pm = placeEdge(markerPoint.x, markerPoint.y, markerPoint.behind, stageBox.width, stageBox.height, inset);
-  markerOnScreen = pm.onScreen;
-  if (pm.onScreen) edgeMarker.hide();
+  // The marker counts as seen when it is inside the stage, below the HUD band and not under the
+  // slider, the pad or the Help button. Then (or when the arrow would sit right on it) no arrow:
+  // two symbols for one spot hide the marker colour near touchdown.
+  const mx = (markerPoint.x * 0.5 + 0.5) * stageBox.width;
+  const my = (0.5 - markerPoint.y * 0.5) * stageBox.height;
+  const inStage = !markerPoint.behind && mx >= 0 && mx <= stageBox.width && my >= hudBottom && my <= stageBox.height;
+  const covered = inStage && underCover(stageBox.left + mx, stageBox.top + my);
+  const seen = inStage && !covered;
+  const near = inStage && !covered && Math.hypot(pm.x - mx, pm.y - my) < MARKER_ARROW_NEAR;
+  markerOnScreen = pm.onScreen || seen;
+  if (pm.onScreen || seen || near) edgeMarker.hide();
   else {
     const band = p.outcome === 'soft' ? 'good' : p.vs < 4 ? 'warn' : 'bad';
     if (edgeMarker.element.dataset['band'] !== band) edgeMarker.element.dataset['band'] = band;
@@ -1284,6 +1355,10 @@ function testState(): Record<string, unknown> {
     posX: f ? f.state.pos.x : 0,
     toast: toastNow ? TOAST_TEXT[toastNow] : null,
     keyHintShown,
+    // Visible answers on the lander itself (R3 finding 1): attitude-thruster puffs alive now, and
+    // the engine's share (0..1) in the halo tint and size high up.
+    rcsPuffs: scene ? scene.rcsPuffs : 0,
+    haloThrottle: scene ? scene.haloThrottle : 0,
   };
 }
 

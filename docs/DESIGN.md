@@ -101,7 +101,7 @@ flowchart LR
 - The PI controller has anti-windup: it integrates only while the throttle is not at a limit.
 - When the player moves the throttle, the helper turns off and hands back the engine at its current power (no jump).
 - A property test lands from random starts (350 to 700 m, up to 15 m/s down, up to 8 m/s drift) over flat ground. Every run is soft.
-- `src/sim/helper-sites.test.ts` runs the helper on the real terrain file of each site from 16 seeded starts. Every run must be soft, with fuel left in [10, 25) s and no fuel star. It also flies a scripted efficient pilot by the HUD bands (never red; 30 s or more on sites 1 to 3), helper takeovers from mid-flight states and at the moment the prompt says "help" (every site), a "ring + thrifty" pilot (3 stars on every site) and a noisy novice who takes over at 150 m. Each block prints a `console.table` of the measured numbers (see section 4).
+- `src/sim/helper-sites.test.ts` runs the helper on the real terrain file of each site from 16 seeded starts. Every run must be soft, with fuel left in [10, 25) s and no fuel star. It also flies a scripted efficient pilot by the HUD bands (never red; 30 s or more on sites 1 to 3), helper takeovers from mid-flight states and at the moment the prompt says "help" (every site), a "ring + thrifty" pilot (3 stars on every site), a noisy novice who takes over at 150 m, and real-input novices (keys and slider through `ControlShaper`) who take over at 300 m and 150 m. Each block prints a `console.table` of the measured numbers (see section 4).
 - A landing counts as "with help" when the helper was on below 60 m or at touchdown. The picker shows a small helper mark next to those best stars.
 
 ### Predictor
@@ -109,6 +109,7 @@ flowchart LR
 The predictor copies the state and integrates forward with the current input held. The hover helper keeps running inside the prediction.
 It uses 1/15 s steps, looks at most 110 s ahead and interpolates the contact moment. The scene draws a ring at the touchdown point (green = soft, yellow = under 4 m/s, red = harder) and a ghost trail.
 A property test checks the predictor against the full 1/60 s sim: within 0.3 s, 0.2 m/s and 1.5 m.
+While the player holds a key, the pad or a stick, the input is a short press, not a plan (R3 finding 9). Then the prediction fades a held tilt to the helper's lean and a held throttle (manual flight) to hover over 1.5 s (`LIVE_INPUT_FADE`). So a lean toward the ring does not throw the marker far away in red. With no input the prediction holds the input as is, and the property test above still covers that case.
 
 ### Determinism
 
@@ -144,7 +145,26 @@ A seed plus an input script replays the same trace. A test checks this.
   - (b) The efficient pilot flies by the HUD bands and never shows red. It keeps 30 s or more on sites 1 to 3. It does not steer to the ring. On sites 4 to 6 the test prints the runs but does not assert the fuel.
   - (d) The "ring + thrifty" pilot leans toward the ring (at most 12°, only while the engine pushes) and flies by the HUD bands. While high, it plans its fall speed: as fast as 20 m/s while there is time to reach the ring, but never so slow that it spends the fuel-star reserve. It must get 3 stars on at least 1 seed on every site, with a median fuel left of 33 s or more on sites 1 to 3.
   - (e) A novice reads the HUD 0.4 s late and moves the lever with ±15% noise. It takes over from Help at 150 m. It must land softly in 80% or more of 20 seeds on every site.
+  - (f) Real-input novices (R3 finding 2) use the game's own input path. Help flies down to the takeover height (300 m or 150 m) and hands the engine over at its own throttle, as in the game. The child reads the HUD 0.4 s late and moves only the engine:
+    - **Keys:** W and S through `mapKeyboard` and `ControlShaper.update`, so the first-press step (0.08) and the key lever rate (0.85/s) are the real ones. The child holds W while the speed mark is past the green band, until the mark crosses the middle of the green band. The child holds S while the lander climbs, until the mark is back at the middle.
+    - **Slider:** the same rule, with one relative drag of 10% lever per look (every 0.4 s).
+    - Both tap Help when the game shows "Low fuel: tap Help", the same as a child who reads the prompt. The table shows how many landed by hand and how many took Help.
+    - Each pilot must land softly in 80% or more of 12 seeds, for each site and each takeover height.
   - If a site fails (d), raise its start fuel by about 2.5 kg per missing second, while the helper's left stays in [10, 25) s in (a).
+  - If (f) fails, tune the key lever rate (`KEY_LEVER_RATE`) or add a hover detent in `ControlShaper`. Do not change the assert.
+
+**Real-input novices (f), measured table.** Status: **to measure.** The F5 round wrote the test, but nothing ran. The operator copies the `console.table` of (f) here after `pnpm test`.
+
+| Site | Keys, take over at 300 m: soft (by hand / Help at prompt) | Keys, 150 m | Slider, 300 m | Slider, 150 m |
+| --- | --- | --- | --- | --- |
+| Sea of Tranquility | to measure | to measure | to measure | to measure |
+| Ocean of Storms | to measure | to measure | to measure | to measure |
+| Fra Mauro Highlands | to measure | to measure | to measure | to measure |
+| Descartes Highlands | to measure | to measure | to measure | to measure |
+| Taurus-Littrow Valley | to measure | to measure | to measure | to measure |
+| Hadley Rille | to measure | to measure | to measure | to measure |
+
+Expectation before the run (hand estimate, not a measurement): the middle of the green band is about half the helper's speed. A child who holds it from 300 m needs more fuel than the tank holds, so many runs may end with "tap Help". The "by hand" column answers the owner's question "can a child hold hover with W/S?". A low "by hand" share is a design finding (the lever rate or the fuel), not a test failure.
 - The drift points roughly toward the target (±35°), like a real approach.
 - The start is at least 150 m above the local ground.
 - A soft landing on a site opens the next one.
@@ -170,6 +190,12 @@ A seed plus an input script replays the same trace. A test checks this.
 - **Crater cast shadows (decoration):** the sun is fixed per site, so each detail crater of 2.5 px or more gets a soft dark crescent on its sun side, baked into the detail map alpha. Only the unrotated 150 m sample uses it, because only that sample lines up with the world and the sun.
 - **Soft horizon:** the data tile ends in a straight edge 7.65 km from the centre. Over the outer 1.8 km (as a circle round the site centre) the far ground fades to the black sky and sinks up to 120 m. So the horizon is soft and curved, not a straight cut. The sim heights never change.
 - **Lander halo:** a soft halo, a fixed 52 px on screen, sits behind the lander so it reads from high up. It fades out between 90 m and 40 m.
+- **Input on the lander itself (R3 finding 1).** In the descent cam the lander is small, and the real lean at 100 ms is only about 3°. So every input also shows on the lander, within one frame, at a fixed size on screen:
+  - **Attitude-thruster puffs:** when the player's tilt command changes or is held, 2 to 4 small white puffs jet out of the corner thrusters on the side opposite the lean. A burst follows every 0.09 s while the command changes or is held. Each puff lives 0.42 s and is never less than 13 px across. They use the shaped tilt command, not the lagged sim tilt, so they answer on the frame of the key press. A pool of 24 additive sprites shares the glow texture (no new texture, no allocation per puff). The low tier fires 1 puff per thruster.
+  - **Engine on the halo:** above 90 m the halo turns warm and grows up to 1.3 times with the throttle (square-root curve, so the first press at 10% shows). From 90 m to 60 m it fades back to the plain halo.
+  - **Plume glow from above:** the real plume points away from the descent cam. So a short warm glow (20 to 46 px with the throttle) sits 3.2 m below the lander along its axis. It fades out from 60 m to 25 m, where the real plume and the ground glow show.
+  - **Tilt chevron:** while a tilt key, the pad or a stick is held, a short white chevron with a dark outline sits on the halo edge, in the screen direction of the command.
+  - The test state has `rcsPuffs` (puffs alive) and `haloThrottle` (the engine share in the halo). e2e checks both within 3 rendered frames of ArrowLeft and W.
 - **Regolith per site:** maria (Tranquility, Storms) are darker and warmer, with fewer and smaller craters. Highlands (Fra Mauro, Descartes) are lighter, with more craters. The Taurus-Littrow floor is dark under bright massif slopes. Steep slopes are brighter.
 - **Brightness variation:** three octaves of seeded noise, about ±12%.
 - **Decoration, not data:** a seeded detail map adds craters and grain to the shading (normal and brightness maps). It never changes the heights the lander touches.
@@ -206,11 +232,14 @@ A seed plus an input script replays the same trace. A test checks this.
 - **Edge arrows:** when the ring centre or the predicted touchdown point is outside the usable frame (below the HUD, above the controls, inside the sides), an arrow on the frame edge points to it. The ring arrow is mint and shows the distance in metres. The marker arrow has the marker colour.
   - The circle (not the circle plus label) sits on the clamped point. On the right half of the view the label goes to the left of the circle, so it is always on the inner side.
   - Every inset is at least the circle radius + 8 px (30 px), and the top inset is below the HUD band. The stage starts right of the rail, so an arrow is never under the rail.
+  - The marker arrow hides when the marker itself is visible: inside the stage, below the HUD band and not under the slider, the pad or the Help button. It also hides when its clamped point is within 40 px of the marker. Two symbols for one spot hid the marker colour near touchdown (R3 finding 7).
 - **Landed:** a low, slow orbit around the lander.
 
 ## 7. HUD and controls
 
 - Readouts sit at the top, right of the rail: height, speed down, drift arrow and speed, fuel in seconds with the 60 s mark and the 30 s star tick, engine power with the hover mark, and a tilt ball with the 10° limit.
+- The fuel number rounds down, the same as the debrief and the star (30 s or more). So "30" on the HUD always means the star still holds.
+- The call-out and the toast sit 10 px below the HUD band. The page measures the band into `--mt-hud-bottom` (the HUD wraps to 2 or 3 rows on phones). When both show, the toast moves one row down, below the call-out. The toast stays 2.5 s.
 - **Speed-down bands follow the height. One colour language:** green = the safe speed, yellow = fast but you can still stop, red = real danger, brake now.
   - The safe speed is the helper's target speed (1.5 + 0.06 × height, up to 12 m/s). Green is up to the safe speed + 0.5 m/s in both modes.
   - **Helper flight:** yellow up to the safe speed + 2.5 m/s, red above. Correct helper flight is always green.
@@ -221,6 +250,7 @@ A seed plus an input script replays the same trace. A test checks this.
 - The throttle lever uses a curve (throttle = 10% + 90% · k², k from the lever). Hover (m · 1.62 / 45,000 = 15.5 to 16.8% with the site fuels) sits at k = √((0.16 − 0.1) / 0.9) ≈ 0.26, about a quarter of the way up, with more travel where it matters.
 - Keyboard: W/S engine, arrow keys or I J K L tilt (A/D and E/Q still work). Space = Help. P pause, M sound. Keys are read by `KeyboardEvent.code`, so every layout works.
 - Key response (F4): a first W press from off steps the lever to 0.08 (the engine lights on that frame), then the lever ramps at 0.85 per second: off to hover in about 0.26 s, the full range in about 1.1 s. Tilt keys reach their command in 50 ms; a white ring on the tilt ball shows the command at once, before the lander turns.
+- Ready screen: until the first solo landing, Help is armed on the ready screen (no toast). The chip says "Help", the Help button is pressed, and the touch tip "Help is on, slide to take over" is true. Go shows "Help flies the engine". Engine input on the ready screen starts the flight, and Help hands the engine over on that frame ("You fly now").
 - Who flies: engine input from the player while Help flies turns Help off on the key event itself. The toast says "You fly now"; turning Help on says "Help flies the engine". Tilt input keeps Help on the engine (the player steers). The input chip (top left of the HUD row) shows the device, who flies the engine ("Help" / "You") and lit key caps (or the slider and pad glyphs). This replaces the old "Help" badge.
 - Keyboard ready tip: "Press W for engine, arrows to steer, Space for Help" with key caps. In the first manual flight, if no key is pressed for 3 s after Help turns off, the same keys show once.
 - On Android phones a short buzz marks the touchdown (only with touch controls on, sound on and reduced motion off).
@@ -234,7 +264,8 @@ Menus stay on the left (owner rule). On phones, the rail becomes a left drawer. 
 
 ## 9. Honest simplifications
 
-- The lander is a point mass with an ideal gimballed thrust vector. No rotational inertia, no reaction-control thrusters and no fuel slosh.
+- The lander is a point mass with an ideal gimballed thrust vector. No rotational inertia, no reaction-control thrusters and no fuel slosh. The thruster puffs are a visual cue for the tilt command: they do not push the lander.
+- The warm halo, the plume glow from above and the tilt chevron are visual aids for the descent cam, not physical effects.
 - Attitude follows the command with a simple first-order lag. The engine throttles instantly.
 - No yaw: the lander always faces the camera.
 - The ground is the 60 m data grid with bilinear smoothing. Boulders and craters smaller than about 120 m are not in the heights.
@@ -263,3 +294,24 @@ Menus stay on the left (owner rule). On phones, the rail becomes a left drawer. 
 - **Playwright:** the kit smoke suite (load, privacy guard, left menu, manifest and service worker, offline reload, look gate, frame time, clear data, visual baseline) on desktop and phone projects. Plus a full round: pick Tranquility, turn on the helper (tap on phones, Space on desktop), step until touchdown, expect a soft landing, the second site open and the debrief visible. The round also checks that the debrief card and an earned star are fully opaque and that the star is lemon yellow. And a pause test.
 - **Test mode:** `?test=1` freezes the clock and decoration, fixes the seed and exposes `window.__g499` (`step`, `idle`, `renders`, `state`). `state()` returns phase, site, altitude, vs, hs, fuelSeconds, outcome, stars, tick, paused, assist, helped, solo, ringOnScreen, markerOnScreen, ringArrowOnScreen (the ring arrow box is inside the stage), landerOnScreen (the lander centre is in the view, below the HUD band), landerPx, hudBottom, fuelNeed, lowFuelPrompt, promptShown and more. In test mode only, `?fuel=<kg>` sets the start fuel, so e2e can check the prompt timing.
 - **Playwright (F3 additions):** in every project the helper round checks that the ring or its arrow is on screen at every sample, that the lander is on screen below the HUD band below 60 m, that Go does not cover the lander in the ready shot, and that Again / Next / Sites are fully inside the viewport on the debrief. A second test starts with a tank 3 s above the helper's need, flies by hand, expects the "help" prompt at once, taps Help and expects a soft landing.
+- **Playwright (F5 additions):**
+  - `e2e/controls.spec.ts` (desktop Chromium): on the ready screen the chip and the Help button match the player (Help for a new player). Within 3 rendered frames of W: `haloThrottle > 0`, and the toast opacity is 1. Within 3 rendered frames of ArrowLeft: `rcsPuffs > 0`.
+  - `e2e/touch.spec.ts` (iPhone and Pixel, `?test=1&live=1`): the ready tip, the chip and the Help button agree. A 60 px slider drag (touch pointer events) turns Help off, raises the lever, shows "You fly now" and keeps the engine on within 3 frames. The toast box does not touch the HUD box and its opacity is 1. A drag left on the pad gives a left command and puffs within 3 frames, then a lean of more than 2° within 0.3 s of sim time. A tap on the slider keeps the lever. The page does not scroll or zoom.
+- **Vitest (F5 additions):** the puff trigger and the firing thrusters (`src/scene/rcsPuffs.test.ts`), the predictor fade (`src/sim/flight.test.ts`) and the real-input novices (f).
+
+### Human playtest protocol (pending owner)
+
+Status: **pending owner.** No human has flown the game yet (R3 finding 2). Run it once before the next review.
+
+- **Who:** a child of about 7 to 10, or an adult who plays like a child. They have not played before.
+- **Setup:** a fresh profile (rail: Clear data). Site 1, Sea of Tranquility. Sound on.
+- **Flights:**
+  1. 3 flights on a keyboard (desktop, W/S and the arrow keys).
+  2. 3 flights on a phone (touch slider and pad).
+- **Rules for the observer:** say nothing about the controls before the first flight. Do not point at the screen. Write the answers after each flight.
+- **The 3 questions (from R3 finding 2):**
+  1. Did the player take over from Help (yes / no, and at what height)?
+  2. Did the player land softly in 3 tries (count the soft landings)?
+  3. Did the player feel that the lander answered the keys or the slider? Ask: "When you pressed, did the lander do something?" Write the words the player used.
+- **Also note:** where the player looked (the lander or the HUD corner), and any moment the player said "it does not work".
+- **Results:** write a short table here (flight, device, takeover yes/no, soft yes/no, answer to question 3).

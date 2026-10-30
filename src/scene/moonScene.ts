@@ -1,6 +1,8 @@
 /**
  * Moon Touchdown scene: real terrain under a low sun, a black sky with stars and the Earth, the
- * glowing target ring, the lander with plume, engine light, halo and dust, the predicted
+ * glowing target ring, the lander with plume, engine light, halo and dust, the input cues that
+ * read from high up (attitude-thruster puffs, a warm halo and plume glow with the engine, a tilt
+ * chevron on the halo edge), the predicted
  * touchdown marker with its ghost trail, a soft ground glow under the lander near the ground,
  * and the camera.
  *
@@ -33,7 +35,8 @@ import { LanderModel } from './landerModel';
 import type { SunDirection } from './shade';
 import { EARTH_AZIMUTH, Sky } from './sky';
 import { DEFAULT_LOOK, TerrainView, type Lod, type TerrainSource } from './terrainView';
-import { makeRegolithDetail, makeSoftSprite, type RegolithDetail } from './textures';
+import { RCS, RcsPuffs, RcsTrigger, THRUSTERS, firingThrusters } from './rcsPuffs';
+import { makeChevronSprite, makeRegolithDetail, makeSoftSprite, type RegolithDetail } from './textures';
 
 export type ScenePhase = 'pick' | 'ready' | 'flying' | 'landed';
 
@@ -49,6 +52,14 @@ export interface SceneView {
   landedFor: number;
   outcome: Outcome | null;
   paused: boolean;
+  /**
+   * The player's shaped tilt command (rad, +x = right, +z = toward the camera), not the lagged
+   * sim tilt: the thruster puffs answer it on the frame of the key press. 0 with no input.
+   */
+  cmdTiltX: number;
+  cmdTiltZ: number;
+  /** A tilt key, the pad or a stick is held now: a chevron on the halo edge shows the command. */
+  tiltHeld: boolean;
 }
 
 export interface MoonSceneOptions {
@@ -108,6 +119,20 @@ const SWOOP_TIME = 1.5;
 /** Lander halo: size on screen (px), faded out below these heights (m). */
 const HALO_PX = 52;
 const HALO_FADE = { low: 40, high: 90 } as const;
+/**
+ * Engine on the halo: above `full` m the halo turns warm and grows up to `scale` times at full
+ * throttle; below `low` m it is the plain halo again (the real plume shows by then).
+ */
+const HALO_THROTTLE = { low: 60, full: 90, scale: 1.3 } as const;
+const HALO_COOL = new THREE.Color('#cfe6ff');
+const HALO_WARM = new THREE.Color('#ffb066');
+/**
+ * Plume glow seen from above: a short warm glow this far (m) below the lander along its axis, a
+ * fixed size on screen (px across, low to full throttle). It fades out from `high` to `low` m.
+ */
+const PLUME_GLOW = { drop: 3.2, minPx: 20, maxPx: 46, low: 25, high: 60 } as const;
+/** Tilt chevron on the halo edge: size and gap beyond the halo radius (px). */
+const CHEVRON = { px: 22, gap: 7 } as const;
 /** Ground glow under the lander starts at this height (m). */
 const GLOW_HEIGHT = 50;
 /** Soft contact shadow under the lander (a visual aid) starts at this height (m). */
@@ -146,6 +171,21 @@ export class MoonScene {
   private readonly trailPos: Float32Array;
   private readonly halo: THREE.Sprite;
   private readonly haloMat: THREE.SpriteMaterial;
+  /** Halo fade (0..1) and its engine share (0..1) in the last update. */
+  private haloK = 0;
+  private haloThr = 0;
+  private readonly plumeGlow: THREE.Sprite;
+  private readonly plumeGlowMat: THREE.SpriteMaterial;
+  private readonly chevron: THREE.Sprite;
+  private readonly chevronMat: THREE.SpriteMaterial;
+  private readonly rcs: RcsPuffs;
+  private readonly rcsTrigger = new RcsTrigger();
+  /** Puffs started in this page (drives the small, repeatable jitter). */
+  private rcsSeq = 0;
+  private readonly cueA: ScreenPoint = { x: 0, y: 0, behind: false };
+  private readonly cueB: ScreenPoint = { x: 0, y: 0, behind: false };
+  private readonly tmpP = new THREE.Vector3();
+  private readonly tmpV = new THREE.Vector3();
   private readonly groundGlow: THREE.Mesh;
   private readonly groundGlowMat: THREE.MeshBasicMaterial;
   private readonly contact: THREE.Mesh;
@@ -282,6 +322,45 @@ export class MoonScene {
     this.halo.renderOrder = 3;
     this.halo.visible = false;
     scene.add(this.halo);
+
+    // The engine seen from above: a short warm glow under the lander, a fixed size on screen.
+    this.plumeGlowMat = new THREE.SpriteMaterial({
+      map: glow,
+      color: '#ffc07a',
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: false,
+      toneMapped: false,
+    });
+    this.plumeGlow = new THREE.Sprite(this.plumeGlowMat);
+    this.plumeGlow.name = 'plume-glow';
+    this.plumeGlow.renderOrder = 3;
+    this.plumeGlow.visible = false;
+    scene.add(this.plumeGlow);
+
+    // Tilt chevron on the halo edge, toward the commanded tilt (drawn on top of everything).
+    const chevronTex = makeChevronSprite(64);
+    this.sprites.push(chevronTex);
+    this.chevronMat = new THREE.SpriteMaterial({
+      map: chevronTex,
+      transparent: true,
+      opacity: 0,
+      depthTest: false,
+      depthWrite: false,
+      sizeAttenuation: false,
+      toneMapped: false,
+    });
+    this.chevron = new THREE.Sprite(this.chevronMat);
+    this.chevron.name = 'tilt-chevron';
+    this.chevron.renderOrder = 6;
+    this.chevron.visible = false;
+    scene.add(this.chevron);
+
+    // Attitude-thruster puffs: a small pool of additive sprites that share the glow texture.
+    this.rcs = new RcsPuffs(glow);
+    scene.add(this.rcs.group);
 
     // A soft dark contact shadow right under the lander in the last 20 m (a visual aid: the real
     // sun shadow falls far to the west at a 12 degree sun). Skipped on the low tier.
@@ -422,6 +501,18 @@ export class MoonScene {
     this.puffed = false;
     this.swoop = -1;
     this.dust.clear();
+    this.rcs.clear();
+    this.rcsTrigger.reset();
+  }
+
+  /** Attitude-thruster puffs alive now (test API). */
+  get rcsPuffs(): number {
+    return this.rcs.count;
+  }
+
+  /** The engine's share (0..1) in the halo tint and size now; 0 when the halo is plain or off (test API). */
+  get haloThrottle(): number {
+    return this.haloThr;
   }
 
   /** Ground height (m) at a world point, or 0 before a site loads. */
@@ -477,6 +568,7 @@ export class MoonScene {
     const flicker = live && motion > 0 ? this.rng.next() : 0.5;
     const showEngine = v.phase === 'flying' && !v.paused ? v.throttle : 0;
     this.lander.setEngine(showEngine, flicker, 1);
+    this.fireThrusters(dt, v);
 
     // Dust: the plume reaches the ground below about 30 m.
     const ground = terrain.heightAt(s.pos.x, s.pos.z);
@@ -538,6 +630,7 @@ export class MoonScene {
 
     this.terrainView.updatePatch(s.pos.x, s.pos.z);
     this.updateCamera(dt, v, ground);
+    this.updateCues(dt, v);
     this.updateSun(s);
     this.sky.update(this.kit.camera, live ? t : 0);
   }
@@ -548,17 +641,124 @@ export class MoonScene {
     this.beacon.position.y = this.targetGround + 130 * scale;
   }
 
+  /** Sprite scale (sizeAttenuation off) for a size on screen in px: scale 1 spans 1 / tan(fov / 2) half-heights. */
+  private pxScale(px: number): number {
+    const p11 = 1 / Math.tan((this.kit.camera.fov * DEG) / 2);
+    return (2 * px) / (p11 * this.viewHeight);
+  }
+
   private updateHalo(v: SceneView): void {
     const on = v.phase === 'ready' || v.phase === 'flying';
     const k = on ? smoothstep(HALO_FADE.low, HALO_FADE.high, v.altitude) : 0;
+    // The engine on the halo: warm and bigger with the throttle high up, plain below 60 m.
+    const thr =
+      v.phase === 'flying' && !v.paused
+        ? clamp(v.throttle, 0, 1) * smoothstep(HALO_THROTTLE.low, HALO_THROTTLE.full, v.altitude)
+        : 0;
+    this.haloK = k;
     this.halo.visible = k > 0.01;
+    this.haloThr = this.halo.visible ? thr : 0;
     if (!this.halo.visible) return;
-    this.haloMat.opacity = 0.34 * k;
+    // A square root, so the first press (10% throttle) already shows: a third warm, a little bigger.
+    const e = Math.sqrt(thr);
+    this.haloMat.opacity = (0.34 + 0.2 * e) * k;
+    this.haloMat.color.copy(HALO_COOL).lerp(HALO_WARM, e);
     this.halo.position.copy(this.lander.root.position);
     this.halo.position.y += 0.6;
-    // sizeAttenuation off: scale 1 spans (1 / tan(fov / 2)) half-heights of the view.
-    const p11 = 1 / Math.tan((this.kit.camera.fov * DEG) / 2);
-    this.halo.scale.setScalar((2 * HALO_PX) / (p11 * this.viewHeight));
+    this.halo.scale.setScalar(this.pxScale(this.haloPx()));
+  }
+
+  /** Halo size on screen (px): HALO_PX, up to HALO_THROTTLE.scale times with the engine high up. */
+  private haloPx(): number {
+    return HALO_PX * (1 + (HALO_THROTTLE.scale - 1) * Math.sqrt(this.haloThr));
+  }
+
+  /**
+   * Attitude-thruster puffs from the shaped tilt command (not the lagged sim tilt): a new command
+   * fires on this frame from the two corner thrusters on the side opposite the lean, then a burst
+   * follows every RCS.interval s while the command changes or is held.
+   */
+  private fireThrusters(dt: number, v: SceneView): void {
+    if (v.paused) return;
+    if (v.phase !== 'flying') {
+      this.rcsTrigger.reset();
+      return;
+    }
+    const burst = this.rcsTrigger.update(v.cmdTiltX, v.cmdTiltZ, dt);
+    if (!burst) return;
+    const m = Math.hypot(burst.x, burst.z);
+    // The jet points away from the lean (outward on the far side), with the lander's own speed.
+    const jx = -burst.x / m;
+    const jz = -burst.z / m;
+    const per = this.particleScale >= 0.75 ? 2 : 1;
+    const speed = RCS.speed * (this.motion > 0 ? 1 : 0.6);
+    const root = this.lander.root;
+    root.updateMatrixWorld(true);
+    const lv = v.lander.vel;
+    for (const i of firingThrusters(burst.x, burst.z)) {
+      const t = THRUSTERS[i];
+      if (!t) continue;
+      for (let k = 0; k < per; k++) {
+        this.rcsSeq++;
+        const side = jitter(this.rcsSeq) * 0.3;
+        const lift = jitter(this.rcsSeq + 0.37) * 0.15;
+        const sp = speed * (1 - 0.3 * k);
+        root.localToWorld(this.tmpP.set(t.x, t.y, t.z));
+        this.tmpV.set(lv.x + (jx - jz * side) * sp, lv.y + lift * sp, lv.z + (jz + jx * side) * sp);
+        this.rcs.spawn(this.tmpP, this.tmpV);
+      }
+    }
+  }
+
+  /**
+   * Cues that need this frame's camera: the puffs keep a minimum size on screen, the plume glow
+   * sits under the lander, and the tilt chevron sits on the halo edge toward the command.
+   */
+  private updateCues(dt: number, v: SceneView): void {
+    const cam = this.kit.camera;
+    const tanHalf = Math.tan((cam.fov * DEG) / 2);
+    if (!v.paused) this.rcs.update(dt, cam.position, (2 * tanHalf) / this.viewHeight);
+
+    const root = this.lander.root;
+    const s = v.lander;
+    // Plume glow: from above the real plume hides under the lander, so a warm glow peeks out.
+    const thr = v.phase === 'flying' && !v.paused ? clamp(v.throttle, 0, 1) : 0;
+    const w = smoothstep(PLUME_GLOW.low, PLUME_GLOW.high, v.altitude);
+    this.plumeGlow.visible = thr > 0 && w > 0.01;
+    if (this.plumeGlow.visible) {
+      const u = thrustDir(s.tiltX, s.tiltZ);
+      this.plumeGlow.position.set(
+        root.position.x - u.x * PLUME_GLOW.drop,
+        root.position.y - u.y * PLUME_GLOW.drop,
+        root.position.z - u.z * PLUME_GLOW.drop,
+      );
+      this.plumeGlowMat.opacity = w * (0.3 + 0.45 * thr);
+      this.plumeGlow.scale.setScalar(this.pxScale(lerp(PLUME_GLOW.minPx, PLUME_GLOW.maxPx, thr)));
+    }
+
+    // Tilt chevron: on the halo edge, in the screen direction of the commanded tilt.
+    const cm = Math.hypot(v.cmdTiltX, v.cmdTiltZ);
+    let chev = v.phase === 'flying' && !v.paused && v.tiltHeld && cm > 0.01 && this.haloK > 0.05;
+    if (chev) {
+      const p = root.position;
+      const dx = v.cmdTiltX / cm;
+      const dz = v.cmdTiltZ / cm;
+      this.project(p.x, p.y, p.z, this.cueA);
+      this.project(p.x + dx * 5, p.y, p.z + dz * 5, this.cueB);
+      const sx = ((this.cueB.x - this.cueA.x) * this.viewHeight * this.aspect) / 2;
+      const sy = ((this.cueB.y - this.cueA.y) * this.viewHeight) / 2;
+      const len = Math.hypot(sx, sy);
+      if (this.cueA.behind || this.cueB.behind || len < 1e-3) chev = false;
+      else {
+        const r = this.haloPx() / 2 + CHEVRON.gap;
+        const k = (5 * r) / len;
+        this.chevron.position.set(p.x + dx * k, p.y + 0.6, p.z + dz * k);
+        this.chevronMat.rotation = Math.atan2(sy, sx);
+        this.chevronMat.opacity = 0.95 * Math.min(1, this.haloK * 1.5);
+        this.chevron.scale.setScalar(this.pxScale(CHEVRON.px));
+      }
+    }
+    this.chevron.visible = chev;
   }
 
   private updateGroundGlow(v: SceneView, terrain: Terrain): void {
@@ -746,6 +946,9 @@ export class MoonScene {
     this.trail.geometry.dispose();
     (this.trail.material as THREE.Material).dispose();
     this.haloMat.dispose();
+    this.plumeGlowMat.dispose();
+    this.chevronMat.dispose();
+    this.rcs.dispose();
     this.groundGlow.geometry.dispose();
     this.groundGlowMat.dispose();
     this.contact.geometry.dispose();
@@ -759,6 +962,12 @@ export class MoonScene {
 function smoothstep(a: number, b: number, x: number): number {
   const k = clamp((x - a) / (b - a), 0, 1);
   return k * k * (3 - 2 * k);
+}
+
+/** Repeatable jitter in -1..1 from a counter (no RNG draw, so the frozen test frames stay the same). */
+function jitter(n: number): number {
+  const x = Math.sin(n * 12.9898) * 43758.5453;
+  return 2 * (x - Math.floor(x)) - 1;
 }
 
 function easeInOut(k: number): number {

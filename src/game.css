@@ -438,10 +438,13 @@
   background: var(--g499-sky);
 }
 
-/* Call-out banner: "60 seconds of fuel". */
+/*
+ * Call-out banner: "60 seconds of fuel". It and the toast sit just below the HUD band, which
+ * src/main.ts measures into --mt-hud-bottom (the HUD wraps to 2 or 3 rows on phones).
+ */
 .mt-callout {
   position: absolute;
-  top: calc(120px + var(--g499-safe-top));
+  top: calc(var(--mt-hud-bottom, 110px) + 10px);
   left: calc(var(--g499-rail-inset) + (100% - var(--g499-rail-inset)) / 2);
   transform: translateX(-50%);
   padding: 10px 22px;
@@ -511,7 +514,7 @@
 /* Toast below the input chip: "You fly now" (lemon) / "Help flies the engine" (mint). */
 .mt-toast {
   position: absolute;
-  top: calc(120px + var(--g499-safe-top));
+  top: calc(var(--mt-hud-bottom, 110px) + 10px);
   left: calc(14px + var(--g499-rail-inset) + var(--g499-safe-left));
   display: inline-flex;
   align-items: center;
@@ -532,6 +535,11 @@
 
 .mt-toast[data-kind='help'] {
   color: var(--g499-mint);
+}
+
+/* A call-out shows too: the toast goes one row down, below it. */
+.game-app.mt-stack .mt-toast {
+  top: calc(var(--mt-hud-bottom, 110px) + 10px + var(--mt-callout-h, 48px) + 8px);
 }
 
 @keyframes mt-toast-in {
@@ -1522,11 +1530,6 @@
     display: none;
   }
 
-  .mt-callout,
-  .mt-toast {
-    top: calc(130px + var(--g499-safe-top));
-  }
-
   /* Phones: the chip keeps the device icon, who flies and the live glyphs, smaller. */
   .mt-input {
     gap: 5px;
@@ -1563,11 +1566,6 @@
   .mt-pad {
     width: 140px;
     height: 140px;
-  }
-
-  .mt-callout,
-  .mt-toast {
-    top: calc(68px + var(--g499-safe-top));
   }
 
   .mt-ready {
@@ -1655,7 +1653,8 @@
  */
 html.g499-test .mt-debrief-card,
 html.g499-test .mt-star.is-on,
-html.g499-test .mt-callout {
+html.g499-test .mt-callout,
+html.g499-test .mt-toast {
   animation: none;
 }
 

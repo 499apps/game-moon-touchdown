@@ -276,6 +276,33 @@ export function makeEarthTexture(seed: number): THREE.Texture {
   return tex;
 }
 
+/**
+ * A short, round-ended chevron that points right (+x), white on transparent, for the tilt cue on
+ * the lander halo. The sprite rotation turns it to the commanded tilt.
+ */
+export function makeChevronSprite(size = 64): THREE.Texture {
+  const c = canvas2d(size, size);
+  if (!c) return new THREE.Texture();
+  const { canvas, ctx } = c;
+  const s = size / 64;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // A dark outline first, so the chevron reads on bright ground too.
+  ctx.strokeStyle = 'rgba(10, 12, 32, 0.75)';
+  ctx.lineWidth = 15 * s;
+  ctx.beginPath();
+  ctx.moveTo(22 * s, 14 * s);
+  ctx.lineTo(42 * s, 32 * s);
+  ctx.lineTo(22 * s, 50 * s);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 1)';
+  ctx.lineWidth = 8 * s;
+  ctx.stroke();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 /** Soft round sprite (white centre fading to transparent), for dust, glows and stars. */
 export function makeSoftSprite(size = 64, hardness = 0.25): THREE.Texture {
   const c = canvas2d(size, size);
