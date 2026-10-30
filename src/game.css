@@ -937,6 +937,11 @@
     width: 64px;
   }
 
+  /* The touch slider already shows the engine power. */
+  .mt-touch-on .mt-thr {
+    display: none;
+  }
+
   .mt-callout,
   .mt-badge {
     top: calc(130px + var(--g499-safe-top));

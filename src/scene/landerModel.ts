@@ -139,7 +139,7 @@ export class LanderModel {
       toneMapped: false,
     });
     this.plumeInnerMat = this.plumeMat.clone();
-    this.plumeInnerMat.color = new THREE.Color('#fff1d6');
+    this.plumeInnerMat.color.set('#fff1d6');
     const cone = new THREE.ConeGeometry(1, 1, 24, 1, true);
     cone.translate(0, -0.5, 0);
     this.plumeOuter = new THREE.Mesh(cone, this.plumeMat);

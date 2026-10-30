@@ -30,7 +30,7 @@ export function makeValueNoise(rng: Rng, period: number): (x: number, y: number)
   };
 }
 
-function dataTexture(data: Uint8Array, size: number, srgb: boolean): THREE.DataTexture {
+function dataTexture(data: Uint8Array<ArrayBuffer>, size: number, srgb: boolean): THREE.DataTexture {
   const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
@@ -44,7 +44,7 @@ function dataTexture(data: Uint8Array, size: number, srgb: boolean): THREE.DataT
 }
 
 /** Height field to a tangent-space normal map (wraps at the edges). */
-function heightToNormals(h: Float32Array, size: number, strength: number): Uint8Array {
+function heightToNormals(h: Float32Array, size: number, strength: number): Uint8Array<ArrayBuffer> {
   const out = new Uint8Array(size * size * 4);
   const at = (i: number, j: number) => h[((j + size) % size) * size + ((i + size) % size)] as number;
   for (let j = 0; j < size; j++) {
