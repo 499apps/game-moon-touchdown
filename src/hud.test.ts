@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { assistTargetVs } from './sim/assist';
-import { LIMITS, STAR_FUEL_SECONDS } from './sim/constants';
+import { G_MOON, LIMITS, STAR_FUEL_SECONDS } from './sim/constants';
 import {
   FUEL_TICK_SECONDS,
   VS_GREEN,
+  VS_MANUAL_CAP,
+  VS_RED_BRAKE_SHARE,
   VS_STRICT_HEIGHT,
   VS_YELLOW,
   fuelMarkPercent,
@@ -12,6 +14,7 @@ import {
   vsBarMax,
   vsEnvelope,
   vsLimits,
+  vsStopLimit,
 } from './hud';
 import { niceMax } from './graphs';
 
@@ -42,6 +45,50 @@ describe('speed-down bands', () => {
         if (h < VS_STRICT_HEIGHT && down >= VS_GREEN) return vsBand(down, h) === 'warn';
         return vsBand(down, h) === 'good';
       }),
+    );
+  });
+
+  it('manual flight: yellow is "fast but stoppable", red is real danger', () => {
+    const manual = { assist: false, hoverThrottle: 0.16 };
+    // The fuel-star technique (hold 20 m/s up high) is yellow, not red.
+    expect(vsBand(20, 300, manual)).toBe('warn');
+    expect(vsBand(20, 300)).toBe('bad');
+    // Faster than the cap is red at any height.
+    expect(vsBand(VS_MANUAL_CAP + 0.1, 600, manual)).toBe('bad');
+    // At 45 m, braking at 75% of the spare thrust stops from about 21.5 m/s.
+    expect(vsStopLimit(45, 0.16)).toBeCloseTo(21.5, 1);
+    expect(vsBand(19, 45, manual)).toBe('warn');
+    expect(vsBand(22, 45, manual)).toBe('bad');
+    // Green is the same in both modes; below 10 m the strict bands hold.
+    expect(vsLimits(300, manual).green).toBe(vsLimits(300).green);
+    expect(vsLimits(5, manual)).toEqual(vsLimits(5));
+    // The helper on: the old bands.
+    expect(vsLimits(300, { assist: true, hoverThrottle: 0.16 })).toEqual(vsLimits(300));
+  });
+
+  it('manual red line: braking at the red share from it only just stops in time (property)', () => {
+    fc.assert(
+      fc.property(
+        fc.double({ min: VS_STRICT_HEIGHT, max: 1500, noNaN: true }),
+        fc.double({ min: 0.12, max: 0.25, noNaN: true }),
+        (h, hov) => {
+          const manual = { assist: false, hoverThrottle: hov };
+          const lim = vsLimits(h, manual);
+          const helper = vsLimits(h);
+          const v = vsStopLimit(h, hov);
+          const spare = G_MOON / hov - G_MOON;
+          // Constant braking at the red share from v over (h - 10 m) ends at VS_YELLOW.
+          const end = v * v - 2 * VS_RED_BRAKE_SHARE * spare * (h - VS_STRICT_HEIGHT);
+          return (
+            Math.abs(end - VS_YELLOW * VS_YELLOW) < 1e-6 &&
+            lim.yellow >= helper.yellow - 1e-9 &&
+            lim.yellow <= Math.max(helper.yellow, VS_MANUAL_CAP) + 1e-9 &&
+            lim.green < lim.yellow &&
+            vsStopLimit(h + 10, hov) >= v &&
+            Math.abs(vsBarMax(h, manual) - 2 * lim.yellow) < 1e-9
+          );
+        },
+      ),
     );
   });
 

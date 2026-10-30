@@ -5,10 +5,13 @@
  * few words. Writes to the DOM only when a shown value changes.
  *
  * The speed-down bands follow the height: fast is fine high up, slow near the ground. The safe
- * envelope is the hover helper's target speed, so correct helper flight always shows green.
+ * envelope is the hover helper's target speed, so correct helper flight always shows green. In
+ * manual flight yellow means "fast but stoppable" and red means "brake now" (vsStopLimit).
+ * While the helper flies, the fuel bar stays lemon below the star line (src/game.css): red is for
+ * manual flight only.
  */
 import { assistTargetVs } from './sim/assist';
-import { CALLOUTS, MAX_TILT, STAR_FUEL_SECONDS } from './sim/constants';
+import { CALLOUTS, G_MOON, MAX_TILT, STAR_FUEL_SECONDS } from './sim/constants';
 import { moonIcon, type MoonIcon } from './icons';
 
 export interface HudView {
@@ -48,30 +51,64 @@ export interface VsLimits {
   yellow: number;
 }
 
+/** Manual flight: red starts where braking at this share of the spare thrust only just stops in time. */
+export const VS_RED_BRAKE_SHARE = 0.75;
+/** Manual flight: above this speed down (m/s) the band is red at any height (keeps the bar readable). */
+export const VS_MANUAL_CAP = 25;
+
+/** Who flies the engine, and the hover throttle (the hover mark on the engine bar). */
+export interface VsMode {
+  assist: boolean;
+  hoverThrottle: number;
+}
+
 /** Safe speed down at a height (m/s): the helper's target, never below the touchdown limit. */
 export function vsEnvelope(height: number): number {
   return Math.max(VS_GREEN, -assistTargetVs(height));
 }
 
-/** The green and yellow limits for speed down at a height above the ground. */
-export function vsLimits(height: number): VsLimits {
+/**
+ * Manual flight: the fastest speed down (m/s) that braking at VS_RED_BRAKE_SHARE of the spare
+ * thrust (full thrust upright minus gravity) still brings to VS_YELLOW at the strict height. Above
+ * it, a soft touchdown needs more than that share of the engine: real danger, so red.
+ */
+export function vsStopLimit(height: number, hoverThr: number, g = G_MOON): number {
+  const h = Number.isFinite(height) ? height : 0;
+  const spare = g / Math.max(1e-3, Number.isFinite(hoverThr) ? hoverThr : 1) - g;
+  if (!(spare > 0)) return VS_YELLOW;
+  return Math.sqrt(VS_YELLOW * VS_YELLOW + 2 * VS_RED_BRAKE_SHARE * spare * Math.max(0, h - VS_STRICT_HEIGHT));
+}
+
+/**
+ * The green and yellow limits for speed down at a height above the ground.
+ * - Green: the helper's safe speed + 0.5 m/s (helper flight is always green).
+ * - Yellow, helper flight (and no mode given): the safe speed + 2.5 m/s.
+ * - Yellow, manual flight: "fast but stoppable", up to the stopping limit (vsStopLimit, at most
+ *   VS_MANUAL_CAP). So the fuel-star technique (fall fast, brake late and hard) shows yellow, and
+ *   red always means "brake now".
+ * Below 10 m the strict touchdown bands apply in both modes.
+ */
+export function vsLimits(height: number, mode?: VsMode): VsLimits {
   const h = Number.isFinite(height) ? height : 0;
   if (h < VS_STRICT_HEIGHT) return { green: VS_GREEN, yellow: VS_YELLOW };
   const safe = vsEnvelope(h);
-  return { green: safe + VS_GREEN_SLACK, yellow: safe + VS_YELLOW_SLACK };
+  const green = safe + VS_GREEN_SLACK;
+  let yellow = safe + VS_YELLOW_SLACK;
+  if (mode && !mode.assist) yellow = Math.max(yellow, Math.min(VS_MANUAL_CAP, vsStopLimit(h, mode.hoverThrottle)));
+  return { green, yellow };
 }
 
 /** Colour band of a downward speed (m/s, >= 0) at a height (m). Height 0 = touchdown rules. */
-export function vsBand(down: number, height = 0): Band {
-  const lim = vsLimits(height);
+export function vsBand(down: number, height = 0, mode?: VsMode): Band {
+  const lim = vsLimits(height, mode);
   if (down < lim.green) return 'good';
   if (down < lim.yellow) return 'warn';
   return 'bad';
 }
 
 /** Full scale of the speed bar (m/s): twice the yellow limit, so red is always the right half. */
-export function vsBarMax(height: number): number {
-  return Math.max(VS_BAR_MAX, 2 * vsLimits(height).yellow);
+export function vsBarMax(height: number, mode?: VsMode): number {
+  return Math.max(VS_BAR_MAX, 2 * vsLimits(height, mode).yellow);
 }
 
 /** The first fuel call-out (60 s): the plain tick on the fuel bar. */
@@ -161,11 +198,12 @@ export class Hud {
     const climbing = v.vy > 0.05;
     this.put('vs', Math.abs(v.vy).toFixed(1), (s) => (this.vsValue.textContent = s));
     this.put('vs-icon', climbing ? 'up' : 'down', (s) => (this.vsIcon.innerHTML = moonIcon(s === 'up' ? 'up' : 'down')));
-    this.put('vs-band', climbing ? 'good' : vsBand(down, alt), (s) => (this.vsGauge.dataset['band'] = s));
+    const mode: VsMode = { assist: v.assist, hoverThrottle: v.hoverThrottle };
+    this.put('vs-band', climbing ? 'good' : vsBand(down, alt, mode), (s) => (this.vsGauge.dataset['band'] = s));
     this.put('assist', v.assist ? 'on' : 'off', (s) => (this.root.dataset['assist'] = s));
     // The green part of the bar reaches the safe speed for this height.
-    const lim = vsLimits(alt);
-    const barMax = vsBarMax(alt);
+    const lim = vsLimits(alt, mode);
+    const barMax = vsBarMax(alt, mode);
     this.put('vs-green', ((lim.green / barMax) * 100).toFixed(1), (s) => this.vsBar.style.setProperty('--mt-vs-green', `${s}%`));
     const vsPos = Math.min(1, down / barMax);
     this.put('vs-mark', (vsPos * 100).toFixed(1), (s) => (this.vsMark.style.left = `${s}%`));

@@ -107,3 +107,24 @@ export function assistFuelNeed(height: number, vy: number, hs: number, hoverThr:
   const push = time + (down - ASSIST_TOUCHDOWN_VS) / g + drift;
   return ASSIST_NEED_FACTOR * Math.max(0, push) + ASSIST_NEED_RESERVE;
 }
+
+/** The "tap Help" prompt shows while the fuel left is less than this (s) above the helper's need. */
+export const LOW_FUEL_HELP_MARGIN = 6;
+
+/** What the low-fuel prompt says: tap Help now, brake now, or nothing. */
+export type LowFuelPrompt = 'help' | 'brake' | null;
+
+/**
+ * Low-fuel prompt for a manual pilot, from the fuel left and the helper's need (assistFuelNeed):
+ * - 'help' while the helper can still land softly but only just (need <= fuel < need + 6 s);
+ * - 'brake' when the helper cannot promise a soft landing any more (fuel < need, or the fall is
+ *   too fast to stop in the height left): the child must slow the fall now;
+ * - null otherwise (plenty of fuel, or the tank is already empty).
+ * So "tap Help to land safely" is only said when it is true.
+ */
+export function lowFuelPrompt(fuelSeconds: number, need: number): LowFuelPrompt {
+  if (!(fuelSeconds > 0) || Number.isNaN(need)) return null;
+  if (fuelSeconds < need) return 'brake';
+  if (fuelSeconds < need + LOW_FUEL_HELP_MARGIN) return 'help';
+  return null;
+}

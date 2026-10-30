@@ -1,6 +1,6 @@
 /**
  * The lander: an original, toy-like design. A gold-foil lower stage on four springy legs, a
- * glossy cream cabin with two triangle windows (a friendly face), an antenna dish, small corner
+ * glossy cream cabin with a friendly face (two round windows and a small smile), an antenna dish, small corner
  * thrusters, an engine bell with a soft plume, and a warm engine light for the ground.
  *
  * Origin = centre of mass (the sim position). The footpads sit LEG_DROP below it, at
@@ -86,16 +86,20 @@ export class LanderModel {
     hatch.position.y = 2.25;
     this.body.add(cabin, band, hatch);
 
-    // Face: two triangle windows (pointing down a little, like friendly eyes) and a small door.
+    // Face: two round windows (friendly eyes, each with a small light glint) and a small smile.
+    const glint = new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false });
     for (const side of [-1, 1]) {
-      const win = new THREE.Mesh(new THREE.CircleGeometry(0.34, 3), this.windows);
-      win.rotation.z = -Math.PI / 2 + side * 0.12;
+      const win = new THREE.Mesh(new THREE.CircleGeometry(0.3, 32), this.windows);
       win.position.set(side * 0.5, 1.45, 1.065);
-      this.body.add(win);
+      const spark = new THREE.Mesh(new THREE.CircleGeometry(0.075, 16), glint);
+      spark.position.set(side * 0.5 + 0.1, 1.55, 1.07);
+      this.body.add(win, spark);
     }
-    const door = new THREE.Mesh(roundedBox(0.62, 0.5, 0.06, 0.08, 2), dark);
-    door.position.set(0, 0.92, 1.06);
-    this.body.add(door);
+    // The smile: the lower half of a thin ring (a torus arc turned upside down).
+    const smile = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.05, 8, 24, Math.PI), dark);
+    smile.rotation.z = Math.PI;
+    smile.position.set(0, 1.08, 1.07);
+    this.body.add(smile);
 
     // Antenna dish on a short mast.
     const mast = strut(new THREE.Vector3(0.75, 2.0, -0.5), new THREE.Vector3(1.05, 2.7, -0.7), 0.05, legMat);

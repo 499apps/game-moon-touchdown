@@ -17,9 +17,9 @@ import { hashSeed, createRng } from './kit/prng';
 import { createShell } from './kit/shell';
 import { createStage } from './kit/stage';
 import { readTestMode } from './kit/test-mode';
-import { EdgeArrow, placeEdge, type Insets } from './edgeArrows';
+import { EdgeArrow, arrowInsets, placeEdge, type Insets } from './edgeArrows';
 import { drawDescentChart } from './graphs';
-import { Hud } from './hud';
+import { Hud, vsLimits } from './hud';
 import { moonIcon, type MoonIcon } from './icons';
 import { HeldKeys, TouchControls, collectIntent } from './input/devices';
 import { ControlShaper, throttleToLever } from './input/mapping';
@@ -37,9 +37,17 @@ import {
 import { MoonScene, SUN, type ScenePhase, type ScreenPoint } from './scene/moonScene';
 import { bakeSunShadow } from './scene/shade';
 import type { TerrainSource } from './scene/terrainView';
-import { DT, LEG_DROP, LOW_FUEL_PROMPT_SECONDS } from './sim/constants';
+import { assistFuelNeed, lowFuelPrompt, type LowFuelPrompt } from './sim/assist';
+import { DT, LEG_DROP, STAR_FUEL_SECONDS } from './sim/constants';
 import { Flight, flyHelper, type FlightEvent, type FlightResult, type PilotInput } from './sim/flight';
-import { BUMP_TEXT, FUEL_STAR_TIP, fuelLeftText, fuelOutAdvice, helperLeftText } from './sim/judge';
+import {
+  BUMP_TEXT,
+  FUEL_STAR_TIP,
+  fuelLeftText,
+  fuelOutAdvice,
+  helperFuelOutAdvice,
+  helperLeftText,
+} from './sim/judge';
 import { createLander, hoverThrottle, type LanderState } from './sim/lander';
 import { predictTouchdown, type Prediction } from './sim/predictor';
 import {
@@ -71,6 +79,12 @@ const TEST_STEP_FRAMES = 600;
 const STEER_HINT_HEIGHT = 200;
 /** The helper counts as "flew the landing" when it was on below this height (m). */
 const HELPED_HEIGHT = 60;
+/** Below this view width (px) the layout is a phone: drawer menu, folded debrief. */
+const PHONE_WIDTH = 720;
+/** Below this view height (px) the screen is a landscape phone: the debrief folds too. */
+const PHONE_SHORT = 500;
+/** Default HUD band (px) before the HUD is measured. */
+const DEFAULT_HUD_BAND = 64;
 
 function must<T extends Element>(selector: string): T {
   const el = document.querySelector<T>(selector);
@@ -102,8 +116,8 @@ const starsEl = must<HTMLElement>('#stars');
 const statVs = must<HTMLElement>('#stat-vs');
 const statHs = must<HTMLElement>('#stat-hs');
 const statDist = must<HTMLElement>('#stat-dist');
-const statFuel = must<HTMLElement>('#stat-fuel');
 const statTime = must<HTMLElement>('#stat-time');
+const debriefMore = must<HTMLDetailsElement>('#debrief-more');
 const fuelLeftEl = must<HTMLElement>('#fuel-left-text');
 const fuelNoteStar = must<HTMLElement>('#fuel-note-star');
 const fuelHelperEl = must<HTMLElement>('#fuel-helper');
@@ -161,16 +175,33 @@ let helpedRun = false;
 let steerHinted = false;
 /** The Help button pulsed once on the first ready screen of this page. */
 let helpPulsed = false;
-/** The one-time "Low fuel: tap Help" prompt already showed in this run. */
-let lowFuelPrompted = false;
-/** Height (m) where the tank ran dry in this run, or null. */
+/** The one-time "tap Help" and "Brake now" prompts already showed in this run. */
+let helpPrompted = false;
+let brakePrompted = false;
+/** What the low-fuel prompt says now (manual flight), and the last prompt shown (for tests). */
+let promptNow: LowFuelPrompt = null;
+let promptShown: LowFuelPrompt = null;
+/** Height (m) where the tank ran dry in this run, or null; and whether Help was flying then. */
 let fuelOutHeight: number | null = null;
+let fuelOutHelped = false;
 /** Edge arrows: the ring and the marker are inside the usable frame. */
 let ringOnScreen = false;
 let markerOnScreen = false;
+/** The lander centre is in the view, below the HUD band; its page position (px). */
+let landerOnScreen = false;
+const landerPx = { x: 0, y: 0 };
 let stageBox = { left: 0, top: 0, width: 1, height: 1 };
+/** Bottom of the HUD band, in px from the stage top (0 while the HUD is hidden). */
+let hudBottom = 0;
 const ringPoint: ScreenPoint = { x: 0, y: 0, behind: false };
 const markerPoint: ScreenPoint = { x: 0, y: 0, behind: false };
+const landerPoint: ScreenPoint = { x: 0, y: 0, behind: false };
+/** Test mode only: `?fuel=<kg>` sets the start fuel (to check the low-fuel prompt). */
+const testFuel = (() => {
+  if (!testMode.enabled) return null;
+  const v = Number(new URLSearchParams(window.location.search).get('fuel'));
+  return Number.isFinite(v) && v > 0 ? v : null;
+})();
 const sources = new Map<string, TerrainSource>();
 const shaper = new ControlShaper();
 const keys = new HeldKeys();
@@ -310,7 +341,9 @@ async function selectSite(index: number): Promise<void> {
 function prepareRun(site: SiteInfo, src: TerrainSource): void {
   runCount++;
   const rng = createRng(hashSeed(`${seed}:${site.slug}:${runCount}`));
-  flight = new Flight(src.terrain, startConditions(site, rng, src.terrain));
+  const start = startConditions(site, rng, src.terrain);
+  if (testFuel !== null) start.fuel = testFuel;
+  flight = new Flight(src.terrain, start);
   fullFuel = flight.fuelSeconds;
   phase = 'ready';
   paused = false;
@@ -322,8 +355,12 @@ function prepareRun(site: SiteInfo, src: TerrainSource): void {
   calloutLeft = 0;
   helpedRun = false;
   steerHinted = false;
-  lowFuelPrompted = false;
+  helpPrompted = false;
+  brakePrompted = false;
+  promptNow = null;
+  promptShown = null;
   fuelOutHeight = null;
+  fuelOutHelped = false;
   edgeRing.pulse(false);
   tiltPadEl.classList.remove('is-pulse');
   // The first ready screen of a new player: the Help button pulses once.
@@ -390,15 +427,22 @@ function setTouch(on: boolean): void {
   if (!on) touch.reset();
   renderToggleItem('controls', on, 'controls', 'Touch controls');
   updateUi();
+  measureHud();
 }
 
 function handleEvents(events: FlightEvent[]): void {
   for (const e of events) {
     if (e.type === 'callout') {
-      showCallout(`${e.seconds} seconds of fuel`, e.seconds <= 30 ? 'bad' : 'warn', { icon: 'fuel' });
+      if (assist && e.seconds <= STAR_FUEL_SECONDS && helperCanLand()) {
+        // The helper flies: the fuel star is gone, but nothing is wrong. Lemon, not red.
+        showCallout('Fuel star gone. Help still lands safely.', 'warn', { icon: 'fuel' });
+      } else {
+        showCallout(`${e.seconds} seconds of fuel`, e.seconds <= STAR_FUEL_SECONDS ? 'bad' : 'warn', { icon: 'fuel' });
+      }
       sounds.callout(e.seconds);
     } else if (e.type === 'fuel-out') {
       fuelOutHeight = flight ? flight.altitude : 0;
+      fuelOutHelped = assist;
       showCallout('Out of fuel', 'bad', { icon: 'fuel' });
       sounds.fuelOut();
     } else {
@@ -426,7 +470,11 @@ function onTouchdown(r: FlightResult): void {
   updateUi();
 }
 
-function showCallout(text: string, band: 'warn' | 'bad', opts: { icon?: MoonIcon; prompt?: boolean } = {}): void {
+function showCallout(
+  text: string,
+  band: 'warn' | 'bad',
+  opts: { icon?: MoonIcon; prompt?: boolean; key?: string } = {},
+): void {
   calloutEl.textContent = '';
   if (opts.icon) {
     const icon = document.createElement('span');
@@ -435,23 +483,59 @@ function showCallout(text: string, band: 'warn' | 'bad', opts: { icon?: MoonIcon
     calloutEl.append(icon);
   }
   calloutEl.append(document.createTextNode(text));
+  if (opts.key) {
+    const key = document.createElement('kbd');
+    key.className = 'mt-key';
+    key.textContent = opts.key;
+    calloutEl.append(key);
+  }
   calloutEl.classList.toggle('is-prompt', opts.prompt === true);
   calloutEl.dataset['band'] = band;
   calloutEl.hidden = false;
   calloutLeft = opts.prompt ? PROMPT_TIME : CALLOUT_TIME;
 }
 
+/** The helper's fuel need from here (hover-seconds, assistFuelNeed). */
+function helperNeed(f: Flight): number {
+  const s = f.state;
+  return assistFuelNeed(f.altitude, s.vel.y, f.horizontalSpeed, hoverThrottle(s));
+}
+
+/** The helper can still land softly with the fuel left. */
+function helperCanLand(): boolean {
+  return flight !== null && flight.fuelSeconds >= helperNeed(flight);
+}
+
 /**
- * A manual pilot low on fuel: one gentle prompt per run, and the Help button pulses. The helper
- * can take over at any time; the 60 s and 30 s call-outs still play as before.
+ * Low-fuel prompts for a manual pilot, driven by the helper's real fuel need (lowFuelPrompt), so
+ * "tap Help to land safely" is only said while it is true. Each shows once per run:
+ * - 'help': the helper can still land softly, only just. The Help button pulses.
+ * - 'brake': too late for the helper, and the lander falls faster than the safe speed: brake now
+ *   ("slide up" on the touch slider, the W key on a keyboard).
+ * The 60 s and 30 s call-outs still play as before.
  */
-function promptLowFuel(): void {
-  lowFuelPrompted = true;
-  showCallout('Low fuel: tap Help to land safely', 'warn', { icon: 'assist', prompt: true });
-  assistBtn.classList.remove('is-pulse');
-  // Restart the pulse animation (it may have played on the ready screen): force a layout.
-  assistBtn.getBoundingClientRect();
-  assistBtn.classList.add('is-pulse');
+function updateLowFuelPrompt(f: Flight): void {
+  if (phase !== 'flying' || assist || !(f.fuelSeconds > 0)) {
+    promptNow = null;
+    return;
+  }
+  promptNow = lowFuelPrompt(f.fuelSeconds, helperNeed(f));
+  if (promptNow === 'help' && !helpPrompted) {
+    helpPrompted = true;
+    promptShown = 'help';
+    showCallout('Low fuel: tap Help to land safely', 'warn', { icon: 'assist', prompt: true });
+    assistBtn.classList.remove('is-pulse');
+    // Restart the pulse animation (it may have played on the ready screen): force a layout.
+    assistBtn.getBoundingClientRect();
+    assistBtn.classList.add('is-pulse');
+  } else if (promptNow === 'brake' && !brakePrompted) {
+    const down = -f.state.vel.y;
+    if (down < vsLimits(f.altitude).green) return;
+    brakePrompted = true;
+    promptShown = 'brake';
+    if (touchOn) showCallout('Brake now: slide up', 'warn', { icon: 'slideUp', prompt: true });
+    else showCallout('Brake now: hold', 'warn', { icon: 'slideUp', prompt: true, key: 'W' });
+  }
 }
 
 // ---------- Overlays ----------
@@ -528,10 +612,11 @@ function showDebrief(): void {
   let reason = '';
   let reasonIcon: MoonIcon | null = null;
   if (fuelOutHeight !== null && !r.stars.fuel) {
-    // The tank ran dry: explain why and give one tip, never blame.
-    const advice = fuelOutAdvice(fuelOutHeight);
+    // The tank ran dry: explain why and give one tip, never blame. When Help was flying, the
+    // text is about Help (it started too late), not about the child's braking.
+    const advice = fuelOutHelped ? helperFuelOutAdvice() : fuelOutAdvice(fuelOutHeight);
     reason = `${advice.text} ${advice.tip}`;
-    reasonIcon = 'fuel';
+    reasonIcon = fuelOutHelped ? 'assist' : 'fuel';
   } else if (!soft) {
     reason = r.verdict.reasons.map((k) => BUMP_TEXT[k]).slice(0, 2).join(' ');
   } else if (!r.stars.close) {
@@ -558,8 +643,9 @@ function showDebrief(): void {
   statVs.textContent = `${r.touchdown.vs.toFixed(1)} m/s`;
   statHs.textContent = `${r.touchdown.hs.toFixed(1)} m/s`;
   statDist.textContent = `${Math.round(r.distance)} m`;
-  statFuel.textContent = `${Math.floor(r.touchdown.fuelSeconds)} s`;
   statTime.textContent = `${Math.round(r.touchdown.time)} s`;
+  // Phones fold the chart and the fact card into "More", so Again / Next / Sites stay in view.
+  debriefMore.open = window.innerWidth >= PHONE_WIDTH && window.innerHeight >= PHONE_SHORT;
   showFuelNote(flight, r);
   factMap.innerHTML = moonMapSvg(site.lat, site.lon, 'mt-fact-map-svg', `Where ${site.name} is on the Moon`);
   factSite.textContent = factFor(site, runCount - 1);
@@ -680,9 +766,7 @@ function update(dt: number): void {
       stepCarry -= DT;
       handleEvents(f.step(lastInput));
     }
-    if (phase === 'flying' && !assist && !lowFuelPrompted && f.fuelSeconds > 0 && f.fuelSeconds < LOW_FUEL_PROMPT_SECONDS) {
-      promptLowFuel();
-    }
+    updateLowFuelPrompt(f);
     if (phase === 'flying') {
       predictClock += dt;
       if (predictClock >= PREDICT_EVERY - 1e-9) {
@@ -772,22 +856,57 @@ if (stage.kit) {
 function measureStage(): void {
   const r = stageHost.getBoundingClientRect();
   stageBox = { left: r.left, top: r.top, width: Math.max(1, r.width), height: Math.max(1, r.height) };
+  measureHud();
 }
 
-/** The usable frame: below the HUD, above the touch controls, inside the safe areas. */
-function edgeInsets(): Insets {
+/**
+ * The HUD band: the bottom of the HUD (and, on phones, of the drawer button at the top left), in
+ * px from the stage top. The flight camera keeps the lander below it; edge arrows stay below it.
+ */
+function measureHud(): void {
+  let bottom = 0;
+  if (!hudEl.hidden) bottom = hudEl.getBoundingClientRect().bottom - stageBox.top;
+  if (window.innerWidth < PHONE_WIDTH) {
+    const t = shell.menu.toggleButton.getBoundingClientRect();
+    if (t.height > 0) bottom = Math.max(bottom, t.bottom - stageBox.top);
+  }
+  hudBottom = Math.max(0, bottom);
+  scene?.setFrameInsets(hudBottom > 0 ? hudBottom : DEFAULT_HUD_BAND, cameraBottom());
+}
+
+/** Controls band for the flight camera (px): the touch controls fill the bottom 30% in portrait. */
+function cameraBottom(): number {
+  return touchOn && stageBox.height > stageBox.width ? stageBox.height * 0.3 : 40;
+}
+
+/** Controls band for the edge arrows (px): the slider, the pad and the Help button. */
+function controlsBottom(): number {
   const w = stageBox.width;
   const h = stageBox.height;
-  const phone = window.innerWidth < 720;
-  const side = phone ? 44 : 28;
-  let bottom = 28;
-  if (touchOn) bottom = h > w ? h * 0.3 : 130;
-  else if (!assistBtn.hidden) bottom = 120;
-  return { top: phone ? 150 : 96, right: side, bottom, left: side };
+  if (touchOn) return h > w ? h * 0.3 : 130;
+  if (!assistBtn.hidden) return 120;
+  return 20;
+}
+
+/** The usable frame: below the HUD, above the controls, the whole circle inside every side. */
+function edgeInsets(): Insets {
+  return arrowInsets(hudBottom > 0 ? hudBottom : DEFAULT_HUD_BAND, controlsBottom());
+}
+
+/** Where the lander is on screen (it must not slide under the HUD band). */
+function updateLanderPoint(s: MoonScene): void {
+  const p = sceneLander().pos;
+  s.project(p.x, p.y, p.z, landerPoint);
+  const x = (landerPoint.x * 0.5 + 0.5) * stageBox.width;
+  const y = (0.5 - landerPoint.y * 0.5) * stageBox.height;
+  landerPx.x = stageBox.left + x;
+  landerPx.y = stageBox.top + y;
+  landerOnScreen = !landerPoint.behind && x >= 0 && x <= stageBox.width && y >= hudBottom && y <= stageBox.height;
 }
 
 function updateEdges(s: MoonScene): void {
   const f = flight;
+  updateLanderPoint(s);
   if (!f || (phase !== 'ready' && phase !== 'flying') || paused || cardOpen()) {
     edgeRing.hide();
     edgeMarker.hide();
@@ -802,7 +921,8 @@ function updateEdges(s: MoonScene): void {
   if (pr.onScreen) edgeRing.hide();
   else {
     const away = Math.hypot(f.state.pos.x, f.state.pos.z);
-    edgeRing.show(stageBox.left + pr.x, stageBox.top + pr.y, pr.angle, `${Math.round(away)} m`);
+    // The label sits on the inner side of the circle, so it never leaves the view.
+    edgeRing.show(stageBox.left + pr.x, stageBox.top + pr.y, pr.angle, `${Math.round(away)} m`, pr.x > stageBox.width / 2);
   }
   const p = phase === 'flying' ? prediction : null;
   if (!p) {
@@ -817,7 +937,7 @@ function updateEdges(s: MoonScene): void {
   else {
     const band = p.outcome === 'soft' ? 'good' : p.vs < 4 ? 'warn' : 'bad';
     if (edgeMarker.element.dataset['band'] !== band) edgeMarker.element.dataset['band'] = band;
-    edgeMarker.show(stageBox.left + pm.x, stageBox.top + pm.y, pm.angle);
+    edgeMarker.show(stageBox.left + pm.x, stageBox.top + pm.y, pm.angle, undefined, pm.x > stageBox.width / 2);
   }
 }
 
@@ -907,6 +1027,10 @@ sitesBtn.addEventListener('click', () => {
   actions++;
   openPicker();
 });
+// The chart is drawn at its shown size: draw it again when "More" opens on a phone.
+debriefMore.addEventListener('toggle', () => {
+  if (debriefMore.open && flight && !debriefEl.hidden) drawDescentChart(chartEl, flight.trace);
+});
 
 // Opening the drawer on a phone pauses the flight.
 shell.menu.toggleButton.addEventListener('click', () => {
@@ -918,11 +1042,22 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && phase === 'flying') setPaused(true);
 });
 
+// The HUD band changes when the HUD shows, wraps or resizes: the camera and the arrows follow.
+if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => measureHud()).observe(hudEl);
+
 renderRailIcons();
 renderPicker();
 pickerEl.hidden = false;
 measureStage();
 updateUi();
+
+/** The ring edge arrow shows and its whole box is inside the stage (test state only). */
+function ringArrowInStage(): boolean {
+  if (edgeRing.element.hidden) return false;
+  const a = edgeRing.element.getBoundingClientRect();
+  const st = stageHost.getBoundingClientRect();
+  return a.width > 0 && a.left >= st.left - 0.5 && a.right <= st.right + 0.5 && a.top >= st.top - 0.5 && a.bottom <= st.bottom + 0.5;
+}
 
 function testState(): Record<string, unknown> {
   const f = flight;
@@ -947,6 +1082,13 @@ function testState(): Record<string, unknown> {
     solo: progress.solo,
     ringOnScreen,
     markerOnScreen,
+    ringArrowOnScreen: ringArrowInStage(),
+    landerOnScreen,
+    landerPx: { x: landerPx.x, y: landerPx.y },
+    hudBottom,
+    fuelNeed: f && (phase === 'ready' || phase === 'flying') ? helperNeed(f) : null,
+    lowFuelPrompt: promptNow,
+    promptShown,
     debrief: !debriefEl.hidden,
     unlocked: progress.unlocked,
     touchControls: touchOn,

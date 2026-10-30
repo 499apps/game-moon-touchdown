@@ -6,6 +6,10 @@
  * `placeEdge` is pure (unit tested); `EdgeArrow` only writes the DOM when a value changes.
  */
 
+/** Radius (px) of the ring arrow circle; insets keep the whole circle plus this gap on screen. */
+export const EDGE_RADIUS = 22;
+export const EDGE_GAP = 8;
+
 /** Margins (px) of the usable frame inside the view. */
 export interface Insets {
   top: number;
@@ -22,6 +26,17 @@ export interface EdgePlacement {
   y: number;
   /** Arrow direction (rad, screen space, 0 = right, + = clockwise because y is down). */
   angle: number;
+}
+
+/**
+ * Insets for the arrows: every side at least the circle radius + the gap, the top below the HUD
+ * band (hudBottom, px from the view top) and the bottom above the controls band.
+ */
+export function arrowInsets(hudBottom: number, controlsBottom: number): Insets {
+  const min = EDGE_RADIUS + EDGE_GAP;
+  const top = Math.max(min, (Number.isFinite(hudBottom) ? hudBottom : 0) + min);
+  const bottom = Math.max(min, (Number.isFinite(controlsBottom) ? controlsBottom : 0) + EDGE_GAP);
+  return { top, right: min, bottom, left: min };
 }
 
 /**
@@ -91,9 +106,14 @@ export class EdgeArrow {
     this.put('shown', 'no', () => (this.el.hidden = true));
   }
 
-  /** Show the arrow at (left, top) in page pixels, pointing along `angle`. */
-  show(left: number, top: number, angle: number, label?: string): void {
+  /**
+   * Show the arrow at (left, top) in page pixels, pointing along `angle`. The circle is centred on
+   * that point (CSS). `labelLeft` puts the label on the left of the circle (use it on the right
+   * half of the view, so the label is always on the inner side).
+   */
+  show(left: number, top: number, angle: number, label?: string, labelLeft = false): void {
     this.put('shown', 'yes', () => (this.el.hidden = false));
+    this.put('side', labelLeft ? 'left' : 'right', (s) => this.el.classList.toggle('is-label-left', s === 'left'));
     this.put('pos', `${left.toFixed(0)},${top.toFixed(0)}`, () => {
       this.el.style.left = `${left.toFixed(0)}px`;
       this.el.style.top = `${top.toFixed(0)}px`;

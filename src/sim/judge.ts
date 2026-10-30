@@ -72,7 +72,7 @@ export function fuelOutAdvice(height: number): FuelAdvice {
   if (!(height <= FUEL_OUT_HIGH)) {
     return {
       text: 'Out of fuel up high: start braking a bit later next time.',
-      tip: 'Tip: fall faster up high, then brake hard near the ground. Help can also fly the engine for you.',
+      tip: 'Tip: fall faster up high (yellow is OK), then brake hard before the red. Help can also fly the engine for you.',
     };
   }
   return {
@@ -81,8 +81,22 @@ export function fuelOutAdvice(height: number): FuelAdvice {
   };
 }
 
-/** The reason line when the landing was soft but the fuel star was missed. */
-export const FUEL_STAR_TIP = `Keep ${STAR_FUEL_SECONDS} s of fuel for another star: fall faster up high, then brake later and harder.`;
+/**
+ * Kind words when the tank ran dry while Help was flying the engine. The helper flies a slow,
+ * careful profile; it ran dry because it started with too little fuel, not because of the child.
+ */
+export function helperFuelOutAdvice(): FuelAdvice {
+  return {
+    text: 'Help started too late to save fuel.',
+    tip: 'Tip: tap Help earlier next time, as soon as the Help sign shows.',
+  };
+}
+
+/**
+ * The reason line when the landing was soft but the fuel star was missed. It matches the speed
+ * gauge: yellow means fast but safe to stop, red means brake now.
+ */
+export const FUEL_STAR_TIP = `Keep ${STAR_FUEL_SECONDS} s of fuel for another star: fall fast in the yellow up high, then brake hard before the red.`;
 
 /** Debrief fuel line: what was left and where the star is. */
 export function fuelLeftText(seconds: number): string {

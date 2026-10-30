@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 import { DEG, LIMITS, STAR_FUEL_SECONDS, TARGET_RADIUS } from './constants';
-import { FUEL_OUT_HIGH, FUEL_STAR_TIP, fuelLeftText, fuelOutAdvice, helperLeftText, judgeTouchdown, scoreStars } from './judge';
+import {
+  FUEL_OUT_HIGH,
+  FUEL_STAR_TIP,
+  fuelLeftText,
+  fuelOutAdvice,
+  helperFuelOutAdvice,
+  helperLeftText,
+  judgeTouchdown,
+  scoreStars,
+} from './judge';
 
 const ok = { vs: 1, hs: 0.5, tilt: 2 * DEG, slope: 3 * DEG };
 
@@ -88,6 +97,20 @@ describe('fuel words', () => {
       }),
     );
     expect(harsh.test(FUEL_STAR_TIP)).toBe(false);
+    const helper = helperFuelOutAdvice();
+    expect(harsh.test(helper.text) || harsh.test(helper.tip)).toBe(false);
+  });
+
+  it('a helper fuel-out talks about Help, never about the child braking', () => {
+    const a = helperFuelOutAdvice();
+    expect(a.text).toMatch(/Help/);
+    expect(a.tip).toMatch(/^Tip: /);
+    expect(`${a.text} ${a.tip}`).not.toMatch(/brak/i);
+  });
+
+  it('the fuel-star tip uses the speed gauge colours: yellow is fine, red means brake', () => {
+    expect(FUEL_STAR_TIP).toMatch(/yellow/);
+    expect(FUEL_STAR_TIP).toMatch(/before the red/);
   });
 
   it('shows the fuel left with the star line, and the helper number to beat', () => {

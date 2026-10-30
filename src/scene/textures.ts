@@ -5,6 +5,7 @@
  */
 import * as THREE from 'three';
 import { createRng, type Rng } from '../kit/prng';
+import type { SunDirection } from './shade';
 
 /** Seeded, tileable 2D value noise on an integer lattice of `period` cells. */
 export function makeValueNoise(rng: Rng, period: number): (x: number, y: number) => number {
@@ -90,19 +91,58 @@ export function craterRadius(u: number, rMin = CRATER_R_MIN, rMax = CRATER_R_MAX
   return rMin / Math.sqrt(Math.max(1e-9, k));
 }
 
+/** Cast shadows: craters at least this big (px) get one; the darkest shadow keeps this share of light. */
+const SHADOW_MIN_R = 2.5;
+const SHADOW_FLOOR = 0.3;
+/** How far (crater radii) the lit part of the floor moves away from the sun, at most. */
+const SHADOW_SHIFT_MAX = 0.62;
+
+/** Shift (crater radii) of the rim shadow for a sun elevation: lower sun, longer shadow. */
+export function craterShadowShift(elevation: number): number {
+  const t = Math.tan(Math.max(1e-3, elevation));
+  return Math.min(SHADOW_SHIFT_MAX, 0.13 / t);
+}
+
+/**
+ * Cast shadow inside a bowl crater, 0 (lit) .. 1 (full shadow), at an offset (ox, oy) from the
+ * crater centre in crater radii. (sx, sy) is the unit direction toward the sun in the same frame.
+ * The sun-side rim throws its shadow across the floor, so the lit part of the floor is the crater
+ * disc moved `shift` radii away from the sun: a dark crescent on the side toward the sun.
+ */
+export function craterShadow(ox: number, oy: number, sx: number, sy: number, shift: number): number {
+  const d = Math.hypot(ox, oy);
+  if (!(d < 1)) return 0;
+  const out = Math.hypot(ox + sx * shift, oy + sy * shift);
+  const k = Math.min(1, Math.max(0, (out - 0.9) / 0.2));
+  const edge = 1 - Math.min(1, Math.max(0, (d - 0.9) / 0.1));
+  return k * k * (3 - 2 * k) * edge;
+}
+
 /**
  * Decorative regolith detail: seeded craters and grain, tileable. This is NOT elevation data;
  * it only changes shading, never the ground the lander touches.
+ *
+ * With a sun direction, each crater (2.5 px or more) also gets a soft cast-shadow crescent on its
+ * sun side, stored in the albedo alpha. The terrain shader reads that alpha only from the
+ * unrotated 150 m sample, whose axes match the world (u = x, v = z), so the shadows point the
+ * right way for the fixed sun of the site.
  */
 export function makeRegolithDetail(
   seed: number,
   size = 256,
   look: DetailLook = { craterDensity: 1, craterScale: 1 },
+  sun?: SunDirection,
 ): RegolithDetail {
   const rng = createRng(seed);
   const h = new Float32Array(size * size);
   // Extra brightness of fresh craters (floors darker, rims and rays brighter).
   const fresh = new Float32Array(size * size);
+  // Light kept after the cast shadows (1 = no shadow).
+  const light = new Float32Array(size * size).fill(1);
+  const sunLen = sun ? Math.hypot(sun.x, sun.z) : 0;
+  const sx = sun && sunLen > 1e-6 ? sun.x / sunLen : 0;
+  const sy = sun && sunLen > 1e-6 ? sun.z / sunLen : 0;
+  const shift = sun && sunLen > 1e-6 ? craterShadowShift(sun.elevation) : 0;
   const noise = makeValueNoise(rng, 32);
   for (let j = 0; j < size; j++) {
     for (let i = 0; i < size; i++) {
@@ -136,6 +176,10 @@ export function makeRegolithDetail(
           dh += depth * 0.35 * Math.exp(-(((d - 1) / 0.28) ** 2));
           h[k] = (h[k] as number) + dh;
         }
+        if (shift > 0 && d < 1 && r >= SHADOW_MIN_R) {
+          const shade = craterShadow((px + 0.5 - cx) / r, (py + 0.5 - cy) / r, sx, sy, shift);
+          if (shade > 0) light[k] = (light[k] as number) * (1 - (1 - SHADOW_FLOOR) * shade);
+        }
         if (isFresh) {
           let a = 0;
           if (d < 0.8) a -= FRESH_ALBEDO * (1 - (d / 0.8) ** 2);
@@ -156,7 +200,8 @@ export function makeRegolithDetail(
     alb[k * 4] = g;
     alb[k * 4 + 1] = g;
     alb[k * 4 + 2] = g;
-    alb[k * 4 + 3] = 255;
+    // Alpha: light left after the cast shadows (read by the terrain shader, unrotated sample only).
+    alb[k * 4 + 3] = Math.round(Math.max(SHADOW_FLOOR, Math.min(1, light[k] as number)) * 255);
   }
   const albedo = dataTexture(alb, size, true);
   return { normal, albedo };

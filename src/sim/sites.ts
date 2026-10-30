@@ -128,7 +128,7 @@ export const SITES: readonly SiteInfo[] = [
     fuel: 208,
     facts: [
       'In April 1972 a crew landed in these bright highlands, far from the dark lava plains. The rocks here are very old.',
-      'The crew drove a car on the Moon here. Its fastest run was about 18 km/h, a little faster than a child can run.',
+      'The crew drove a car on the Moon here. Its fastest run was about 17 km/h, a little faster than a child can run.',
     ],
     talk: 'Why do you think scientists want to study very old rocks?',
     look: { regolith: '#a09a91', fresh: '#bcb6ac', craterDensity: 1.4, craterScale: 1.15 },

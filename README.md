@@ -6,11 +6,11 @@ It plays at `https://499apps.com/games/moon-touchdown/`.
 - Pick one of six real sites. They go from the flat Sea of Tranquility to the deep valley at Taurus-Littrow and the winding Hadley Rille.
 - The ground is real: LRO LOLA laser altimeter heights, at true scale.
 - Use the engine and tilt to slow down and stop the sideways drift. Touch down under 2 m/s.
-- The speed-down gauge follows the height: fast is fine high up, slow near the ground.
+- The speed-down gauge follows the height: fast is fine high up, slow near the ground. When you fly by hand, yellow means "fast but you can still stop" and red means "brake now".
 - Edge arrows point to the target ring and to the predicted touchdown when they are out of view.
 - Fuel counts in seconds of hovering. Chimes sound at 60 s and 30 s. The first crew heard the "30 seconds" fuel call just before they touched down.
-- Get up to three stars: a soft touchdown, inside the green ring, and 30 s of fuel left (the star tick on the fuel bar). Help always lands safely but uses too much fuel for the fuel star. To earn it, fly the engine yourself: fall faster up high, then brake later and harder. A soft touchdown opens the next site.
-- Low on fuel when you fly by hand? A prompt says "Low fuel: tap Help to land safely". The debrief shows your fuel left and what Help would have left.
+- Get up to three stars: a soft touchdown, inside the green ring, and 30 s of fuel left (the star tick on the fuel bar). Help always lands safely but uses too much fuel for the fuel star. To earn it, fly the engine yourself: fall fast in the yellow up high, then brake hard before the red. A soft touchdown opens the next site.
+- Low on fuel when you fly by hand? While Help can still land safely, a prompt says "Low fuel: tap Help to land safely". When it is too late for Help and you fall fast, it says "Brake now". The debrief shows your fuel left and what Help would have left.
 - After each landing, the debrief shows your descent chart, your touchdown numbers, a Moon map with the site, a fact about the site, a "you vs the real crew" line and a "Talk about it" question for the family.
 - The **Help** button turns on the hover helper. It flies the engine gently and stops the drift. The child steers to the ring.
   New players start with Help on until they land softly once without it. Moving the throttle takes over the engine.

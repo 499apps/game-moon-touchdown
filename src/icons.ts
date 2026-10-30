@@ -1,7 +1,8 @@
 /**
  * Original Moon Touchdown icons (24x24, stroke based, the same style as the kit icons). They
  * carry the meaning without words: a lander, a crater map for sites, a small lander held in a
- * cupped hand for the hover helper, a slider and a pad for the touch controls.
+ * cupped hand for the hover helper, a slider and a pad for the touch controls, a slider with an
+ * up arrow for "brake now: slide up".
  */
 
 const paths = {
@@ -13,6 +14,7 @@ const paths = {
     '<path d="M10 3h4l1 2.5H9z"/><path d="M8.5 5.5h7v3.5h-7z"/><path d="m9.5 9-1.5 2.5"/><path d="m14.5 9 1.5 2.5"/><path d="M3 13.5c1.6 4.2 5 6.5 9 6.5s7.4-2.3 9-6.5"/><path d="M3 13.5 5.2 12"/><path d="M21 13.5 18.8 12"/>',
   controls:
     '<rect x="3.5" y="4" width="4" height="16" rx="2"/><path d="M3.5 13h4"/><circle cx="16.5" cy="13" r="4.5"/><circle cx="16.5" cy="13" r="1.4"/>',
+  slideUp: '<rect x="4" y="3.5" width="5" height="17" rx="2.5"/><path d="M4 15h5"/><path d="M16.5 20V6"/><path d="m12.5 10 4-4 4 4"/>',
   help: '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.5v.6"/><path d="M12 16.8h.01"/>',
   star: '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>',
   lock: '<rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',

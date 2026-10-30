@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import { placeEdge, type Insets } from './edgeArrows';
+import { EDGE_GAP, EDGE_RADIUS, arrowInsets, placeEdge, type Insets } from './edgeArrows';
 
 const W = 1000;
 const H = 600;
@@ -36,6 +36,33 @@ describe('edge arrows', () => {
     const front = placeEdge(0.2, -0.5, true, W, H, INSET);
     expect(front.onScreen).toBe(false);
     expect(front.y).toBeCloseTo(INSET.top, 6);
+  });
+
+  it('arrow insets keep the whole circle on screen, below the HUD and above the controls', () => {
+    const inset = arrowInsets(90, 120);
+    expect(inset.left).toBeGreaterThanOrEqual(EDGE_RADIUS + EDGE_GAP);
+    expect(inset.right).toBeGreaterThanOrEqual(EDGE_RADIUS + EDGE_GAP);
+    expect(inset.top).toBeGreaterThanOrEqual(90 + EDGE_RADIUS);
+    expect(inset.bottom).toBeGreaterThanOrEqual(120);
+    expect(arrowInsets(Number.NaN, -5).top).toBeGreaterThanOrEqual(EDGE_RADIUS + EDGE_GAP);
+  });
+
+  it('with arrow insets the circle never leaves the view (property)', () => {
+    fc.assert(
+      fc.property(
+        fc.double({ min: -50, max: 50, noNaN: true }),
+        fc.double({ min: -50, max: 50, noNaN: true }),
+        fc.boolean(),
+        fc.integer({ min: 320, max: 1600 }),
+        fc.integer({ min: 480, max: 1000 }),
+        (x, y, behind, w, h) => {
+          const inset = arrowInsets(80, 0.3 * h);
+          const p = placeEdge(x, y, behind, w, h, inset);
+          if (p.onScreen) return true;
+          return p.x - EDGE_RADIUS >= 0 && p.x + EDGE_RADIUS <= w && p.y - EDGE_RADIUS >= 80 && p.y + EDGE_RADIUS <= h;
+        },
+      ),
+    );
   });
 
   it('every arrow lies on the inset frame (property)', () => {

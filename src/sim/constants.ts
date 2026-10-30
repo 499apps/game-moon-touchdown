@@ -58,6 +58,3 @@ export const CALLOUTS: readonly number[] = [60, 30];
 
 /** Stars: a soft touchdown, inside the ring, and at least this much fuel left (s). */
 export const STAR_FUEL_SECONDS = 30;
-
-/** A manual pilot below this much fuel (s) gets a one-time "tap Help" prompt. */
-export const LOW_FUEL_PROMPT_SECONDS = 15;

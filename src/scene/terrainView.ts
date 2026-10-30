@@ -12,7 +12,9 @@
  * steep slopes, a broad two-octave brightness variation (about +-12%), baked long sun shadows
  * (bluish) and a decorative crater detail map. The shader samples the detail at two scales (150 m
  * and about 520 m, rotated 37 degrees) so the repeat does not show, and fades the detail normals
- * far away. Detail is decoration, not data.
+ * far away. The detail alpha holds baked crater cast shadows for the fixed sun. The outer ring of
+ * the far mesh fades to the sky and sinks a little, so the straight tile edge never shows. Detail
+ * is decoration, not data.
  */
 import * as THREE from 'three';
 import type { Rng } from '../kit/prng';
@@ -31,6 +33,14 @@ const PATCH_SLACK = 5;
 const SKIRT = 30;
 /** The far mesh is discarded this far (m) inside the patch edge, so it tucks under the patch. */
 const PATCH_INSET = 1;
+/**
+ * Soft horizon: over the outer HORIZON_FADE m (ending HORIZON_EDGE m inside the tile edge, as a
+ * circle round the site centre) the ground darkens to the black sky and sinks up to HORIZON_SINK m.
+ * Decoration only: the sim heights never change.
+ */
+const HORIZON_FADE = 1800;
+const HORIZON_EDGE = 150;
+const HORIZON_SINK = 120;
 
 /** Default regolith colours (hex is sRGB; three stores them linear): warm grey, fresh slopes. */
 export const DEFAULT_LOOK: SiteLook = {
@@ -53,11 +63,25 @@ const mat2 mtRotInv = mat2(0.79864, -0.60182, 0.60182, 0.79864);
 vec2 mtUv2(vec2 uv) { return mtRot * uv * 0.29; }
 `;
 
+/**
+ * The albedo alpha holds the baked crater cast shadows (see makeRegolithDetail). Only the
+ * unrotated sample is aligned with the world and the sun, so only its alpha darkens the colour.
+ */
 const MAP_GLSL = /* glsl */ `
 #ifdef USE_MAP
-  vec4 sampledDiffuseColor = mix( texture2D( map, vMapUv ), texture2D( map, mtUv2( vMapUv ) ), 0.4 );
-  diffuseColor *= sampledDiffuseColor;
+  vec4 mtTex = texture2D( map, vMapUv );
+  vec4 sampledDiffuseColor = mix( mtTex, texture2D( map, mtUv2( vMapUv ) ), 0.4 );
+  diffuseColor.rgb *= sampledDiffuseColor.rgb * mtTex.a;
 #endif
+`;
+
+/**
+ * Far horizon: the data tile ends in a straight 15.3 km edge. The outer ring of the far mesh
+ * fades to the black sky and sinks a little (a soft, curved horizon), so the cut edge never shows.
+ */
+const HORIZON_GLSL = /* glsl */ `
+  gl_FragColor.rgb *= 1.0 - smoothstep( uHorizon.x, uHorizon.y, length( vWorldXZ ) );
+  #include <dithering_fragment>
 `;
 
 const NORMAL_GLSL = /* glsl */ `
@@ -105,6 +129,8 @@ export class TerrainView {
   private readonly farMaterial: THREE.MeshStandardMaterial;
   private readonly nearMaterial: THREE.MeshStandardMaterial;
   private readonly patchRect = { value: new THREE.Vector4(1, 1, -1, -1) };
+  /** Far horizon fade: from this distance (m) from the site centre to this one, the ground goes dark. */
+  private readonly horizon = { value: new THREE.Vector2(1e9, 2e9) };
   private far: THREE.Mesh | null = null;
   private near: THREE.Mesh | null = null;
   private src: TerrainSource | null = null;
@@ -135,9 +161,11 @@ export class TerrainView {
     this.nearMaterial.onBeforeCompile = (shader) => addDetail(shader);
     this.nearMaterial.customProgramCacheKey = () => 'moon-terrain-near';
     const rect = this.patchRect;
+    const horizon = this.horizon;
     this.farMaterial.onBeforeCompile = (shader) => {
       addDetail(shader);
       shader.uniforms['uPatch'] = rect;
+      shader.uniforms['uHorizon'] = horizon;
       shader.vertexShader =
         'varying vec2 vWorldXZ;\n' +
         shader.vertexShader.replace(
@@ -145,11 +173,13 @@ export class TerrainView {
           '#include <begin_vertex>\n  vWorldXZ = (modelMatrix * vec4(transformed, 1.0)).xz;',
         );
       shader.fragmentShader =
-        'uniform vec4 uPatch;\nvarying vec2 vWorldXZ;\n' +
-        shader.fragmentShader.replace(
-          'void main() {',
-          'void main() {\n  if (vWorldXZ.x > uPatch.x && vWorldXZ.x < uPatch.z && vWorldXZ.y > uPatch.y && vWorldXZ.y < uPatch.w) discard;',
-        );
+        'uniform vec4 uPatch;\nuniform vec2 uHorizon;\nvarying vec2 vWorldXZ;\n' +
+        shader.fragmentShader
+          .replace(
+            'void main() {',
+            'void main() {\n  if (vWorldXZ.x > uPatch.x && vWorldXZ.x < uPatch.z && vWorldXZ.y > uPatch.y && vWorldXZ.y < uPatch.w) discard;',
+          )
+          .replace('#include <dithering_fragment>', HORIZON_GLSL);
     };
     this.farMaterial.customProgramCacheKey = () => 'moon-terrain-far';
   }
@@ -183,10 +213,21 @@ export class TerrainView {
       const v = z / 900 + 32;
       return 0.88 + 0.15 * noise(u, v) + 0.06 * noise(u * 3.1, v * 3.1) + 0.03 * noise(u * 9.7 + 5, v * 9.7 + 5);
     };
+    // The outer HORIZON_FADE metres of the tile (as a circle) fade to the sky and sink a little.
+    const half = src.terrain.half;
+    this.horizon.value.set(half - HORIZON_FADE, half - HORIZON_EDGE);
     this.patchI = -1;
     this.patchJ = -1;
     this.buildFar();
     this.updatePatch(0, 0);
+  }
+
+  /** How far (m) the drawn ground sinks near the far edge (0 inside the fade ring). */
+  private horizonSink(x: number, z: number): number {
+    const a = this.horizon.value.x;
+    const b = this.horizon.value.y;
+    const k = Math.min(1, Math.max(0, (Math.hypot(x, z) - a) / (b - a)));
+    return HORIZON_SINK * k * k;
   }
 
   setLod(lod: Lod): void {
@@ -293,7 +334,7 @@ export class TerrainView {
       for (let i = 0; i < n; i++) {
         const x = x0 + i * step;
         const z = z0 + j * step;
-        put(j * n + i, x, t.heightAt(x, z), z);
+        put(j * n + i, x, t.heightAt(x, z) - this.horizonSink(x, z), z);
       }
     }
     const indices: number[] = [];

@@ -392,3 +392,38 @@ The fuel star (30 s) was free on every site.
 - Copy the measured "helper left" and "pilot left" ranges into the 2 tables above and into DESIGN section 4.
 - If a site's helper minimum is below 12 s, add about 2.5 kg per missing second. If its maximum is 25 s or more, remove about 2.5 kg per extra second. (Near the end of a run, 1 kg is about 0.43 s.)
 - The debrief and HUD screenshots change. Run `pnpm e2e:update` after a human checks them.
+
+## F3 changes
+
+Source: `docs/reviews/r2-review.md` (TOP 10 and "DIMENSIONS BELOW 4"). Goal: every dimension at 4 or higher in R3. This round edited files only. Nothing ran: no typecheck, lint, unit tests, build or e2e. The operator runs them next. Kit files (`src/kit/**`) are not changed.
+
+| # | Item | Status | Files |
+| --- | --- | --- | --- |
+| 1 | Low-fuel prompt from `assistFuelNeed`: pure `lowFuelPrompt` ('help' / 'brake' / null). "Brake now: slide up" (slider icon, or "hold W" key-cap) only when falling faster than the green speed. Helper fuel-out debrief line about Help, never the child. Test (c2) on every site. | DONE | `src/sim/assist.ts`, `src/sim/judge.ts`, `src/main.ts`, `src/icons.ts`, `src/sim/assist.test.ts`, `src/sim/judge.test.ts`, `src/sim/helper-sites.test.ts` |
+| 2 | Debrief actions sticky at the bottom of the card on all sizes (card bg, top fade). Phones (< 720 px wide or < 500 px high) fold the chart and fact card into a "More" `details`. The chart is drawn again when "More" opens. Duplicate fuel pill removed. | DONE | `index.html`, `src/game.css`, `src/main.ts` |
+| 3 | One colour language: manual-flight red = stopping limit at 75% of the spare thrust (cap 25 m/s); yellow = fast but stoppable. Helper bands unchanged. Efficient pilot flies by the HUD and must never show red. Tips: "fall fast in the yellow up high, then brake hard before the red". | DONE | `src/hud.ts`, `src/hud.test.ts`, `src/sim/judge.ts`, `src/sim/helper-sites.test.ts`, `README.md` |
+| 4 | Edge arrow: the circle is centred on the clamped point; label on the inner side (`is-label-left`); insets ≥ radius + 8 px, top below the measured HUD band (and the phone drawer button). `ringArrowOnScreen` in the test state. | DONE | `src/edgeArrows.ts`, `src/edgeArrows.test.ts`, `src/game.css`, `src/main.ts` |
+| 5 | `flightPose`: top limit (lander and its top 8 px below the HUD band), bottom limit (ground point above the controls band), distance grows when both do not fit. The page measures the HUD band (ResizeObserver) and passes it with `setFrameInsets`. `landerOnScreen` and `landerPx` in the test state. | DONE | `src/scene/moonScene.ts`, `src/main.ts` |
+| 6 | Helper flight: the 30 s call-out is lemon "Fuel star gone. Help still lands safely." (only while the helper's need is covered); the fuel bar and number stay lemon. Red stays for manual flight. | DONE | `src/main.ts`, `src/game.css`, `src/hud.ts` (comment) |
+| 7 | "Ring + thrifty" pilot (lean toward the ring, at most 12°, only while the engine pushes, flies by the HUD bands, plans its fall speed for reach without spending a 34 s fuel reserve). Asserts 3 stars on ≥ 1 seed per site and a median fuel left ≥ 33 s on sites 1-3. Start fuel not changed: no measurement yet. Measured tables are still to copy into DESIGN section 4 (placeholders "to measure"). | PARTIAL | `src/sim/helper-sites.test.ts`, `docs/DESIGN.md` |
+| 8 | Crater cast-shadow crescents on the sun side (detail-map alpha, read from the unrotated sample only). Soft dark, sunk far horizon (outer 1.8 km). Beacon is a short pillar in flight (14-70 m). Marker ≥ 30 px across. Ground glow from 50 m, brighter (visible at 20-40 m). Soft contact shadow below 20 m, skipped on the low tier. | DONE | `src/scene/textures.ts`, `src/scene/textures.test.ts`, `src/scene/terrainView.ts`, `src/scene/moonScene.ts` |
+| 9 | Ready shot: a low hero shot 9 m below and 70 m (portrait) / 100 m (landscape) behind the lander, 2° down; the lander sits in the upper middle, above Go. The Earth sits to its left. On portrait phones Go moves low in the middle, above the Help button (short screens such as 393 × 659 had no room between the HUD and Go). e2e checks Go does not cover the lander. | DONE | `src/scene/moonScene.ts`, `src/game.css`, `e2e/smoke.spec.ts` |
+| 10 | Hover 15.5-16.8 %, a quarter of the way up (DESIGN, mapping comment). Ready tip shows a "W" key-cap when the touch pad is off. Descartes rover "about 17 km/h". Friendly face: round eyes with a glint and a small smile (the square door is gone). | DONE | `docs/DESIGN.md`, `src/input/mapping.ts`, `index.html`, `src/game.css`, `src/sim/sites.ts`, `src/scene/landerModel.ts` |
+| 11 | Game-feel proxy: noisy, slow novice (0.4 s delay, ±15% lever noise, new wobble every 0.5 s) takes over from Help at 150 m; ≥ 80% soft of 20 seeds per site; table printed. **A human playtest is still recommended** (phone and keyboard: can a first-timer take over from Help and land softly in 3 tries; does the lever feel right near hover?). | DONE (proxy) | `src/sim/helper-sites.test.ts` |
+| 12 | e2e in every project: ring or ring arrow on screen at every flight sample; lander on screen below the HUD band below 60 m (fine steps); Go does not cover the lander; Again / Next / Sites fully in the viewport; no fuel pill. New prompt-timing test with `?test=1&fuel=<kg>` (test mode only): tank 3 s above the helper need, fly by hand, expect "help" at once, tap Help, expect soft. Baselines not changed. | DONE | `e2e/smoke.spec.ts`, `src/main.ts` |
+
+### New and changed tests
+
+- `src/sim/assist.test.ts` (new): prompt boundaries, Infinity and empty-tank cases, property "'help' means the fuel covers the need".
+- `src/sim/helper-sites.test.ts`: (b) now flies by the HUD and asserts 0 red steps on every site; (c2) Help at the "help" prompt on every site; (d) ring + thrifty pilot; (e) novice takeover. Each prints a `console.table`.
+- `src/hud.test.ts`: manual bands (20 m/s at 300 m is yellow, red above the stopping limit, cap), property for the red line.
+- `src/edgeArrows.test.ts`: arrow insets, property "the circle never leaves the view".
+- `src/scene/textures.test.ts`: crater shadow side, shift vs sun height, range property.
+- `src/sim/judge.test.ts`: helper fuel-out words, tip colour words.
+- `e2e/smoke.spec.ts`: the checks in item 12 and the prompt-timing test.
+
+### To do after the run
+
+- Copy the tables of (b), (d) and (e) into DESIGN section 4 (replace "calc" and "to measure").
+- If (d) misses 3 stars on a site, read its "distance median" and "left min": raise the start fuel about 2.5 kg per missing second only while (a) stays in [10, 25) s.
+- The ready shot, flight frames, debrief and HUD screenshots change. Run `pnpm e2e:update` after a human checks them.

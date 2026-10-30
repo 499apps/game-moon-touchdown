@@ -90,7 +90,7 @@
           <span class="mt-go-icon" data-icon="play"></span>
         </button>
         <!-- First flights: Go starts with the helper on. The slider takes over the engine. -->
-        <p class="mt-ready-tip" id="ready-tip-help"><span data-icon="assist"></span> Help is on <span data-icon="controls"></span> slide to take over</p>
+        <p class="mt-ready-tip" id="ready-tip-help"><span data-icon="assist"></span> Help is on <span class="mt-tip-touch"><span data-icon="controls"></span> slide to take over</span><span class="mt-tip-keys"><kbd class="mt-key">W</kbd> to take over</span></p>
         <p class="mt-ready-tip" id="ready-tip-solo" hidden><span data-icon="down"></span> under 2 m/s <span data-icon="target"></span> in the ring</p>
       </div>
 
@@ -144,26 +144,31 @@
             <span class="g499-hud-pill" aria-label="Speed down at touchdown"><span class="mt-pill-icon" data-icon="down"></span><span id="stat-vs">0</span></span>
             <span class="g499-hud-pill" aria-label="Sideways speed at touchdown"><span class="mt-pill-icon" data-icon="drift"></span><span id="stat-hs">0</span></span>
             <span class="g499-hud-pill" aria-label="Distance from the target"><span class="mt-pill-icon" data-icon="target"></span><span id="stat-dist">0</span></span>
-            <span class="g499-hud-pill" aria-label="Fuel left"><span class="mt-pill-icon" data-icon="fuel"></span><span id="stat-fuel">0</span></span>
             <span class="g499-hud-pill" aria-label="Flight time"><span class="mt-pill-icon" data-icon="clock"></span><span id="stat-time">0</span></span>
           </div>
           <div class="mt-fuel-note" id="fuel-note">
             <p><span class="mt-fuel-note-icon" data-icon="fuel"></span><span id="fuel-left-text"></span><span class="mt-fuel-note-star" id="fuel-note-star"></span></p>
             <p id="fuel-helper" hidden><span class="mt-fuel-note-icon" data-icon="assist"></span><span id="fuel-helper-text"></span></p>
           </div>
-          <figure class="mt-chart">
-            <canvas id="chart" aria-label="Descent chart: height and speed down over time"></canvas>
-            <figcaption><i class="mt-key-height"></i> height <i class="mt-key-speed"></i> speed down</figcaption>
-          </figure>
-          <div class="mt-fact">
-            <span class="mt-fact-map" id="fact-map"></span>
-            <div>
-              <p id="fact-site"></p>
-              <p class="mt-fact-real" id="fact-real"></p>
-              <p id="fact-crew"></p>
-              <p id="fact-gravity"></p>
+          <!-- Phones fold the chart and the fact card (src/main.ts opens it on wider screens). -->
+          <details class="mt-more" id="debrief-more" open>
+            <summary class="mt-more-summary"><span class="mt-btn-icon" data-icon="earth"></span><span>More</span></summary>
+            <div class="mt-more-body">
+              <figure class="mt-chart">
+                <canvas id="chart" aria-label="Descent chart: height and speed down over time"></canvas>
+                <figcaption><i class="mt-key-height"></i> height <i class="mt-key-speed"></i> speed down</figcaption>
+              </figure>
+              <div class="mt-fact">
+                <span class="mt-fact-map" id="fact-map"></span>
+                <div>
+                  <p id="fact-site"></p>
+                  <p class="mt-fact-real" id="fact-real"></p>
+                  <p id="fact-crew"></p>
+                  <p id="fact-gravity"></p>
+                </div>
+              </div>
             </div>
-          </div>
+          </details>
           <p class="mt-talk" id="fact-talk"><span class="mt-talk-icon" data-icon="help"></span><span><b>Talk about it:</b> <span id="fact-talk-text"></span></span></p>
           <div class="mt-debrief-actions">
             <button type="button" class="g499-button" id="retry" aria-label="Try again"><span class="mt-btn-icon" data-icon="again"></span><span>Again</span></button>

@@ -9,7 +9,7 @@ import { MAX_TILT } from '../sim/constants';
 
 /** Lever travel at the bottom that keeps the engine off. */
 export const LEVER_OFF = 0.03;
-/** Lever curve exponent: more travel near hover (about 19% thrust) than near full power. */
+/** Lever curve exponent: more travel near hover (about 16% thrust, a quarter of the way up) than near full power. */
 export const LEVER_CURVE = 2;
 /** Lever units per second while a throttle key is held. */
 export const KEY_LEVER_RATE = 0.45;

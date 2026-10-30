@@ -6,11 +6,13 @@
  *
  * Camera, by phase:
  * - pick: a slow orbit over the site.
- * - ready: an establishing shot, low behind the lander, with the horizon and the Earth.
+ * - ready: a low hero shot behind and a little below the lander (70 m portrait, 100 m
+ *   landscape), with the horizon and the Earth below it. The Go button never covers it.
  * - flying: a swoop (1.5 s, a cut with reduced motion) into the descent cam. High up it looks
  *   steeply down so the lander and the ground under it are both in frame; from 80 m to 30 m it
- *   blends into a low chase cam for the touchdown. Portrait keeps the ground point above the
- *   bottom 30% of the frame (the touch controls).
+ *   blends into a low chase cam for the touchdown. The page gives the HUD band and the controls
+ *   band (setFrameInsets): the lander stays below the HUD, the ground point above the controls,
+ *   and the camera moves back when both do not fit.
  * - landed: a low, slow orbit around the lander.
  *
  * The scene never changes the sim: each frame it draws the state it is given.
@@ -85,20 +87,37 @@ const LOW_CAM_H = 30;
 const HIGH_ELEVATION = 70 * DEG;
 const LOW_ELEVATION = 12 * DEG;
 const LOW_DISTANCE = 30;
-/** Keep the ground point this far (rad) inside the top or bottom of the frame. */
-const FRAME_MARGIN = 5 * DEG;
+/** Default usable frame (px): below the HUD band at the top, above the controls at the bottom. */
+const DEFAULT_FRAME = { top: 70, bottom: 40 } as const;
+/** Keep the lander this far (px) below the HUD band; its top sits this far (m) above its centre. */
+const LANDER_MARGIN_PX = 8;
+const LANDER_TOP = 2.7;
 /** Look targets sit this far (m) along the view direction. */
 const LOOK_DIST = 100;
-/** Ready shot: behind the lander toward the Earth, a little above it, looking a little down. */
-const READY_BACK = 150;
-const READY_UP = 12;
-const READY_PITCH = 8 * DEG;
+/**
+ * Ready shot: a low hero shot. Behind the lander and a little below it, so the lander stands
+ * against the black sky in the upper middle, above the Go button, with the horizon and the Earth
+ * (a little to the left) below it. Closer in portrait.
+ */
+const READY_BACK = { portrait: 70, landscape: 100 } as const;
+const READY_DOWN = 9;
+const READY_PITCH = 2 * DEG;
+/** The ready camera faces this far (rad) east of the Earth, so the Earth sits left of the lander. */
+const READY_EARTH_OFFSET = 0.15;
 const SWOOP_TIME = 1.5;
 /** Lander halo: size on screen (px), faded out below these heights (m). */
 const HALO_PX = 52;
 const HALO_FADE = { low: 40, high: 90 } as const;
 /** Ground glow under the lander starts at this height (m). */
-const GLOW_HEIGHT = 40;
+const GLOW_HEIGHT = 50;
+/** Soft contact shadow under the lander (a visual aid) starts at this height (m). */
+const CONTACT_HEIGHT = 20;
+/** Beacon: in flight a short pillar (m), so the descent cam does not see a long streak. */
+const BEACON_FLIGHT = { min: 14, max: 70, perMetre: 0.25 } as const;
+const BEACON_FULL = 260;
+/** The predicted touchdown marker is never smaller than this on screen (px across). */
+const MARKER_MIN_PX = 30;
+const MARKER_RADIUS = 3.3;
 
 const OUTCOME_COLOR = {
   soft: new THREE.Color(palette.lime),
@@ -129,6 +148,14 @@ export class MoonScene {
   private readonly haloMat: THREE.SpriteMaterial;
   private readonly groundGlow: THREE.Mesh;
   private readonly groundGlowMat: THREE.MeshBasicMaterial;
+  private readonly contact: THREE.Mesh;
+  private readonly contactMat: THREE.MeshBasicMaterial;
+  /** The contact shadow is skipped on the low quality tier. */
+  private contactOn: boolean;
+  private beaconScale = 1;
+  /** Usable frame (px) for the flight camera: the HUD band at the top, the controls at the bottom. */
+  private frameTop: number = DEFAULT_FRAME.top;
+  private frameBottom: number = DEFAULT_FRAME.bottom;
   private readonly sprites: THREE.Texture[] = [];
   private detail: RegolithDetail;
   private readonly camPos = new THREE.Vector3(0, 400, 900);
@@ -197,7 +224,7 @@ export class MoonScene {
     this.sky = new Sky(rng, this.sunDir, glow, 0.5 + 0.5 * this.particleScale);
     scene.add(this.sky.group);
 
-    this.detail = makeRegolithDetail(rng.int(1, 1e9), 256, DEFAULT_LOOK);
+    this.detail = makeRegolithDetail(rng.int(1, 1e9), 256, DEFAULT_LOOK, SUN);
     this.terrainView = new TerrainView(this.detail, LOD_BY_TIER[kit.settings.tier]);
     scene.add(this.terrainView.group);
 
@@ -256,7 +283,29 @@ export class MoonScene {
     this.halo.visible = false;
     scene.add(this.halo);
 
-    // A warm glow on the ground under the lander in the last 40 m (a visual aid).
+    // A soft dark contact shadow right under the lander in the last 20 m (a visual aid: the real
+    // sun shadow falls far to the west at a 12 degree sun). Skipped on the low tier.
+    this.contactMat = new THREE.MeshBasicMaterial({
+      map: glow,
+      color: '#000000',
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      toneMapped: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+    const contactGeo = new THREE.CircleGeometry(1, 32);
+    contactGeo.rotateX(-Math.PI / 2);
+    this.contact = new THREE.Mesh(contactGeo, this.contactMat);
+    this.contact.name = 'contact-shadow';
+    this.contact.renderOrder = 1;
+    this.contact.visible = false;
+    this.contactOn = kit.settings.tier !== 'low';
+    scene.add(this.contact);
+
+    // A warm glow on the ground under the lander in the last 50 m (a visual aid).
     this.groundGlowMat = new THREE.MeshBasicMaterial({
       map: glow,
       color: '#ffd9a0',
@@ -288,7 +337,7 @@ export class MoonScene {
       toneMapped: false,
       side: THREE.DoubleSide,
     });
-    const markerGeo = new THREE.RingGeometry(2.4, 3.3, 40);
+    const markerGeo = new THREE.RingGeometry(2.4, MARKER_RADIUS, 40);
     markerGeo.rotateX(-Math.PI / 2);
     this.marker = new THREE.Mesh(markerGeo, this.markerMat);
     this.marker.visible = false;
@@ -311,7 +360,7 @@ export class MoonScene {
     this.terrain = src.terrain;
     // Each site has its own crater density, crater size and colours (decoration only).
     const old = this.detail;
-    this.detail = makeRegolithDetail(src.seed, 256, src.look);
+    this.detail = makeRegolithDetail(src.seed, 256, src.look, SUN);
     this.terrainView.setDetail(this.detail);
     old.albedo.dispose();
     old.normal.dispose();
@@ -336,6 +385,7 @@ export class MoonScene {
     tube.name = 'ring';
     this.ring.add(tube);
     this.targetGround = t.heightAt(0, 0);
+    this.beaconScale = 1;
     this.setBeaconHeight(1, true);
     this.dust.clear();
     this.snap = true;
@@ -344,6 +394,17 @@ export class MoonScene {
   setTier(tier: Tier): void {
     this.terrainView.setLod(LOD_BY_TIER[tier]);
     this.particleScale = this.kit.settings.particleScale;
+    this.contactOn = tier !== 'low';
+  }
+
+  /**
+   * The usable frame for the flight camera, in view pixels: the HUD band at the top and the
+   * controls band at the bottom. The camera keeps the lander below the top band and the ground
+   * point above the bottom band.
+   */
+  setFrameInsets(top: number, bottom: number): void {
+    if (Number.isFinite(top)) this.frameTop = Math.max(0, top);
+    if (Number.isFinite(bottom)) this.frameBottom = Math.max(0, bottom);
   }
 
   resize(width: number, height: number): void {
@@ -435,6 +496,12 @@ export class MoonScene {
     this.trail.visible = p !== null;
     if (p) {
       this.marker.position.set(p.x, terrain.heightAt(p.x, p.z) + 0.35, p.z);
+      // Never smaller than MARKER_MIN_PX across on screen: grow it with the camera distance.
+      const cam = this.kit.camera;
+      const far = cam.position.distanceTo(this.marker.position);
+      // A length L at distance d spans L * H / (2 d tan(fov / 2)) px; the ring is 2 R across.
+      const minScale = (MARKER_MIN_PX * far * Math.tan((cam.fov * DEG) / 2)) / (MARKER_RADIUS * this.viewHeight);
+      this.marker.scale.setScalar(Math.max(1, minScale));
       const col = p.outcome === 'soft' ? OUTCOME_COLOR.soft : p.vs < 4 ? OUTCOME_COLOR.close : OUTCOME_COLOR.bumpy;
       this.markerMat.color.copy(col).multiplyScalar(1.4);
       const n = Math.min(TRAIL_MAX, p.trail.length);
@@ -452,9 +519,16 @@ export class MoonScene {
       (geo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     }
 
-    // The beacon reaches up toward the lander's start height, so the ready shot shows it.
-    if (v.phase === 'ready') this.setBeaconHeight(clamp((v.altitude * 0.85) / 260, 1, 2.6));
-    else if (v.phase === 'pick') this.setBeaconHeight(1);
+    // The beacon reaches up toward the lander's start height, so the ready shot (seen from the
+    // side) shows it. In flight the descent cam looks steeply down, where a tall beam would read
+    // as a streak on the ground: it shrinks to a short pillar that follows the height.
+    let beaconWant = 1;
+    if (v.phase === 'ready') beaconWant = clamp((v.altitude * 0.85) / BEACON_FULL, 1, 2.6);
+    else if (v.phase === 'flying' || v.phase === 'landed') {
+      beaconWant = clamp(BEACON_FLIGHT.perMetre * v.altitude, BEACON_FLIGHT.min, BEACON_FLIGHT.max) / BEACON_FULL;
+    }
+    this.beaconScale = live && motion > 0 && v.phase !== 'pick' ? damp(this.beaconScale, beaconWant, 2.5, dt) : beaconWant;
+    this.setBeaconHeight(this.beaconScale);
     // Beacon fades as the lander gets low (it is there to find the ring from high up).
     this.beaconMat.opacity = v.phase === 'pick' ? 1 : clamp((v.altitude - 20) / 150, 0.15, 1);
     this.ringMat.opacity = 0.85 + (live && motion > 0 ? 0.1 * Math.sin(t * 3) : 0.1);
@@ -488,26 +562,45 @@ export class MoonScene {
   }
 
   private updateGroundGlow(v: SceneView, terrain: Terrain): void {
+    const s = v.lander;
+    const g = terrain.gradientAt(s.pos.x, s.pos.z, 3);
+    const groundY = terrain.heightAt(s.pos.x, s.pos.z);
+    this.tmpQ.set(-g.dx, 1, -g.dz).normalize();
+
+    // Contact shadow: a soft dark disc right under the lander, darker and tighter near the ground.
+    const shadowOn = this.contactOn && (v.phase === 'flying' || v.phase === 'landed') && v.altitude < CONTACT_HEIGHT;
+    this.contact.visible = shadowOn;
+    if (shadowOn) {
+      const c = 1 - Math.max(0, v.altitude) / CONTACT_HEIGHT;
+      this.contactMat.opacity = 0.55 * c;
+      this.contact.scale.setScalar(lerp(5, 3.4, c));
+      this.contact.position.set(s.pos.x, groundY + 0.3, s.pos.z);
+      this.contact.quaternion.setFromUnitVectors(UP, this.tmpQ);
+    }
+
+    // Ground glow: clear from 50 m (it shows at 20-40 m), brighter and tighter as the lander comes down.
     const on = v.phase === 'flying' && v.altitude < GLOW_HEIGHT;
     this.groundGlow.visible = on;
     if (!on) return;
-    const s = v.lander;
     const k = 1 - Math.max(0, v.altitude) / GLOW_HEIGHT;
-    // It gets brighter and tighter as the lander comes down.
-    this.groundGlowMat.opacity = 0.1 + 0.45 * k * k;
-    this.groundGlow.scale.setScalar(lerp(10, 4.5, k));
-    this.groundGlow.position.set(s.pos.x, terrain.heightAt(s.pos.x, s.pos.z) + 0.4, s.pos.z);
-    const g = terrain.gradientAt(s.pos.x, s.pos.z, 3);
-    this.groundGlow.quaternion.setFromUnitVectors(UP, this.tmpQ.set(-g.dx, 1, -g.dz).normalize());
+    const fadeIn = Math.min(1, k / 0.15);
+    this.groundGlowMat.opacity = fadeIn * (0.32 + 0.38 * k);
+    this.groundGlow.scale.setScalar(lerp(12, 5, k));
+    this.groundGlow.position.set(s.pos.x, groundY + 0.4, s.pos.z);
+    this.groundGlow.quaternion.setFromUnitVectors(UP, this.tmpQ);
   }
 
-  /** Establishing shot: behind the lander, looking toward the Earth and a little down. */
+  /**
+   * Establishing shot: a low hero shot behind the lander and a little below it, looking toward
+   * the Earth's side of the sky. The lander stands in the upper middle (clear of the Go button),
+   * the horizon and the Earth sit below it and to the left.
+   */
   private readyPose(s: LanderState, pos: THREE.Vector3, look: THREE.Vector3): void {
-    const az = EARTH_AZIMUTH * 0.6;
+    const az = EARTH_AZIMUTH + READY_EARTH_OFFSET;
     const fx = Math.sin(az);
     const fz = -Math.cos(az);
-    const back = READY_BACK * (this.aspect < 1 ? 1.15 : 1);
-    pos.set(s.pos.x - fx * back, s.pos.y + READY_UP, s.pos.z - fz * back);
+    const back = this.aspect < 1 ? READY_BACK.portrait : READY_BACK.landscape;
+    pos.set(s.pos.x - fx * back, s.pos.y - READY_DOWN, s.pos.z - fz * back);
     const c = Math.cos(READY_PITCH) * LOOK_DIST;
     look.set(pos.x + fx * c, pos.y - Math.sin(READY_PITCH) * LOOK_DIST, pos.z + fz * c);
   }
@@ -515,6 +608,12 @@ export class MoonScene {
   /**
    * Flight camera behind (south of) the lander, looking north. The pitch puts the lander and the
    * ground point under it both in frame: steep high up (descent cam), low near the ground.
+   *
+   * Two limits hold the frame (angles below the horizontal, view-pixel bands from setFrameInsets):
+   * - from the bottom: the ground point stays above the controls band;
+   * - from the top: the lander (and its top) stays below the HUD band.
+   * When the span from the lander to the ground point is wider than the usable band, the camera
+   * moves back until it fits: tan(elev + band) = (d sin(elev) + drop) / (d cos(elev)).
    */
   private flightPose(v: SceneView, ground: number, pos: THREE.Vector3, look: THREE.Vector3): void {
     const s = v.lander;
@@ -522,18 +621,31 @@ export class MoonScene {
     const portrait = this.aspect < 1;
     const w = smoothstep(LOW_CAM_H, HIGH_CAM_H, h);
     const highDist = clamp(45 + 0.12 * h, 60, 90);
-    const dist = lerp(LOW_DISTANCE, highDist, w) * (portrait ? 1.12 : 1);
+    let dist = lerp(LOW_DISTANCE, highDist, w) * (portrait ? 1.12 : 1);
     const elev = lerp(LOW_ELEVATION, HIGH_ELEVATION, w);
+    const half = (this.kit.camera.fov * DEG) / 2;
+    const tanHalf = Math.tan(half);
+    const view = Math.max(1, this.viewHeight);
+    // The usable band, as angles above and below the frame centre.
+    const topLim = Math.atan(Math.max(0.05, 1 - (2 * (this.frameTop + LANDER_MARGIN_PX)) / view) * tanHalf);
+    const botLim = Math.atan(Math.max(0.05, 1 - (2 * this.frameBottom) / view) * tanHalf);
+    const drop = Math.max(0, s.pos.y - ground);
+    const band = topLim + botLim;
+    if (elev + band < 88 * DEG) {
+      const denom = Math.tan(elev + band) * Math.cos(elev) - Math.sin(elev);
+      if (denom > 1e-3) dist = Math.min(400, Math.max(dist, (drop / denom) * 1.06 + LANDER_TOP));
+    }
     const back = dist * Math.cos(elev);
     const up = dist * Math.sin(elev);
     pos.set(s.pos.x, s.pos.y + up, s.pos.z + back);
-    // Angles below the horizontal: to the lander and to the ground point under it.
+    // Angles below the horizontal: to the lander, to its top and to the ground point under it.
     const toLander = elev;
-    const toGround = Math.atan2(up + Math.max(0, s.pos.y - ground), back);
-    const half = (this.kit.camera.fov * DEG) / 2;
-    // Portrait: aim lower, so the ground point stays above the bottom 30% (the controls).
+    const toTop = toLander - Math.atan2(LANDER_TOP * Math.cos(elev), dist);
+    const toGround = Math.atan2(up + drop, back);
+    // Portrait: aim lower, so the ground point stays above the controls.
     let pitch = lerp(toLander, toGround, portrait ? 0.62 : 0.5);
-    pitch = Math.max(pitch, toGround - (half - FRAME_MARGIN));
+    pitch = Math.max(pitch, toGround - botLim);
+    pitch = Math.min(pitch, toTop + topLim);
     pitch = clamp(pitch, 4 * DEG, 86 * DEG);
     look.set(pos.x, pos.y - Math.sin(pitch) * LOOK_DIST, pos.z - Math.cos(pitch) * LOOK_DIST);
   }
@@ -636,6 +748,8 @@ export class MoonScene {
     this.haloMat.dispose();
     this.groundGlow.geometry.dispose();
     this.groundGlowMat.dispose();
+    this.contact.geometry.dispose();
+    this.contactMat.dispose();
     this.detail.albedo.dispose();
     this.detail.normal.dispose();
     for (const tex of this.sprites) tex.dispose();
